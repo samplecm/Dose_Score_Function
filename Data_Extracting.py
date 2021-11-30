@@ -17,6 +17,7 @@ from shapely.geometry.polygon import Polygon
 
 patients_path = os.path.join(os.getcwd(), "Patients")
 processed_path = os.path.join(os.getcwd(), "Processed_Patients")
+training_Path = os.path.join(os.getcwd(), "Training_Data")
 
 def Get_HN_Patients():
 
@@ -44,6 +45,10 @@ def Get_HN_Patients():
         "retina"
     ]
     ptvs = ["30", "35", "40", "45", "50", "54", "55", "60", "70", "63", "56"] 
+
+    training_list = ["brainstem", "larynx", "mandible", "oral_cavity", "parotid_left", 
+                    "parotid_right", "spinal_cord", "submandibular_right", "submandibular_left"]
+
     roi_list = CloneList(organs)
     for i in range(len(ptvs)):
         ptvs[i] = str("ptv" + str(ptvs[i]))
@@ -55,6 +60,8 @@ def Get_HN_Patients():
     #     print("Getting OARs for " + patient)
     #     patient_path = os.path.join(patients_path, patient)
         # dose_array = Get_Dose_Array(patient, patient_path)
+        # if dose_array is None:
+        #    continue
         # GetContours(patient, patient_path, organs)
         # GetPTVs(patient, patient_path, ptvs)
         # Get_ROI_to_PTV_Distances(patient, organs, ptvs)
@@ -63,7 +70,47 @@ def Get_HN_Patients():
         #print("")
     for file in processed_Files:    
         occurrences_dict = Statistics.Get_ROI_Frequencies(file, occurrences_dict)
-    print("")
+        Get_Training_Data(file, training_list)
+    print("Finished processing data for head and neck patients")
+
+def Get_Training_Data(file, roi_list):
+    X = np.ones((12,3)) * 1000 #9 oars, 3 ptv distances for each
+    #First, return without saving if there is no ptv70. 
+    # Last 3 features is volume dose for ptv56,63,70
+    y = np.ones((9, 5)) * 1000 #9 rois, 6 dose features each
+    try:
+        with open(os.path.join(processed_path, file), "rb") as fp:
+            patient : Patient = pickle.load(fp)
+    except:
+        return 
+    if getattr(patient, "ptv70") is None:
+        return
+
+    for i, oar in enumerate(roi_list):
+        org : Contours = getattr(patient, oar)
+        if org != None:
+            ptv70_dist = float(1000 if org.ptv70_dist is None else round(org.ptv70_dist,2))
+            ptv63_dist = float(1000 if org.ptv63_dist is None else round(org.ptv63_dist,2))
+            ptv56_dist = float(1000 if org.ptv56_dist is None else round(org.ptv56_dist,2))
+            dose_vals = [1000]*5 if org.dose is None else org.dose
+            dose_vals = list(dose_vals.values())[1:]
+            dose_vals = [round(float(j),2) for j in dose_vals]
+            X[i, :] = np.array([ptv70_dist, ptv63_dist, ptv56_dist]) 
+            y[i,:] = np.array(dose_vals)  
+    
+    for p, ptv in enumerate(["56", "63", "70"]):
+        ptv : Contours= getattr(patient, str("ptv" + ptv))
+        if ptv is None:
+            continue
+        ptv_volume_dose = 1000 if ptv.volume_dose is None else ptv.volume_dose
+        ptv_volume_dose = list(ptv_volume_dose.values())
+        ptv_volume_dose = [round(float(val),2) for val in ptv_volume_dose]
+        X[p+9,:] = np.array(ptv_volume_dose)
+
+    save_path = os.path.join(training_Path, file)
+    with open(save_path, "wb") as fp:
+        pickle.dump([X, y], fp)
+    print("Finished getting training data for " + file)
 
 def Get_DVHs(patient_name, organs, ptvs, dose_array):    
     processed_patient_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Research/Processed_Patients"
@@ -116,7 +163,7 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
             }
             print("")
             setattr(organ_obj, "dose", dose)
-            setattr(patient, organ, organ_obj)
+            setattr(patient, organ, organ_obj)        
 
 
     for ptv in ptvs:
@@ -156,13 +203,49 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
             }
             print("")
             setattr(ptv_obj, "dose", dose)
+            
+
+            #for ptvs I also want V95, V97, V99.
+            volume_dose = Get_PTV_Volume_Doses(ptv_dose_pixels, float(ptv))
+            setattr(ptv_obj, "volume_dose", volume_dose)
             setattr(patient, str("ptv" + str(ptv)), ptv_obj)
-            
-            # setattr(organ_obj, str("ptv" + ptv + "_dist"), dist)
-            # setattr(patient, organ, organ_obj)
-    with open(os.path.join(processed_patient_path, patient_name), "wb") as fp:
-            pickle.dump(patient, fp)     
-            
+
+    try:        
+        with open(os.path.join(processed_patient_path, patient_name), "wb") as fp:
+            pickle.dump(patient, fp)
+    except: 
+        raise Exception("Could not save processed patient with new DVH attribute.") 
+         
+    if os.path.exists(os.path.join(processed_patient_path, patient_name)):
+        try:
+            with open(os.path.join(processed_patient_path, patient_name), "rb") as fp:
+                patient : Patient = pickle.load(fp)
+        except:
+            raise Exception("Processed patient object for " + patient_name + " was not loadable. Quitting.") 
+    else:     
+        print("Processed patient object for " + patient_name + " was not found. Skipping")    
+        return 
+    print("")           
+
+def Get_PTV_Volume_Doses(ptv_dose_pixels, ptv_dose):
+    perc_95 = 0.95 * ptv_dose
+    perc_97 = 0.97 * ptv_dose
+    perc_99 = 0.99 * ptv_dose
+    
+    total_pixels = len(ptv_dose_pixels)
+    pixels_above_95 = len(list(filter (lambda d: d > perc_95, ptv_dose_pixels)))
+    pixels_above_97 = len(list(filter (lambda d: d > perc_97, ptv_dose_pixels)))
+    pixels_above_99 = len(list(filter (lambda d: d > perc_99, ptv_dose_pixels)))
+
+    v95 = round((pixels_above_95 / total_pixels), 3) * 100
+    v97 = round((pixels_above_97 / total_pixels), 3) * 100
+    v99 = round((pixels_above_99 / total_pixels), 3) * 100
+    volume_dose = {
+        "v_95": v95,
+        "v_97": v97,
+        "v_99": v99
+    }
+    return volume_dose
 
 
 def Get_DVH_Bins(list, num_bins=20):

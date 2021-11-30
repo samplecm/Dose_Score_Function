@@ -1,10 +1,13 @@
 import torch 
 import torch.nn as nn
 import numpy as np 
+import random
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.datasets import load_boston
 from sklearn.preprocessing import StandardScaler
+import os
+import pickle 
 
 class Dose_DataSet(torch.utils.data.DataLoader):
     def __init__(self, X, y, scale_data=True):
@@ -23,17 +26,97 @@ class MLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.layers = nn.Sequential(
-            nn.Linear(13, 64),
+            nn.Linear(36, 32),
             nn.ReLU(),
-            nn.Linear(64,64),
+            nn.Linear(32,64),
+            nn.ReLU(),
+            nn.Linear(64,128),
+            nn.ReLU(),
+            nn.Linear(128,64),
             nn.ReLU(),
             nn.Linear(64,32),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(32, 45)
         )              
     def forward(self, x):
 
         return self.layers(x)     
+
+def Train(path):
+    #first need to split data into training/validation set. Will do a 85/15 split
+    files = os.listdir(path) 
+    num_training_files = int(len(files) * 0.85)
+    random.shuffle(files)
+    training_files = files[0:num_training_files]
+    validation_files = files[num_training_files:]
+    num_validation_files = len(validation_files)
+    X_training_stack = np.zeros((num_training_files, 12 * 3))
+    y_training_stack = np.zeros((num_training_files, 9 * 5))
+    for idx, file in enumerate(training_files):
+        file_path = os.path.join(path, file)
+        with open(file_path, "rb") as fp:
+            X,y = pickle.load(fp)
+            X_training_stack[idx,:] = np.reshape(X, 12*3)
+            y_training_stack[idx, :] = np.reshape(y, 9*5)
+            
+    X_validation_stack = np.zeros((num_validation_files, 12 * 3))
+    y_validation_stack = np.zeros((num_validation_files, 9 * 5))
+    for idx, file in enumerate(validation_files):
+        file_path = os.path.join(path, file)
+        with open(file_path, "rb") as fp:
+            X,y = pickle.load(fp)
+            X_validation_stack[idx,:] = np.reshape(X, 12*3)
+            y_validation_stack[idx, :] = np.reshape(y, 9*5)        
+    
+    #Now create a dataloader object
+    train_set = Dose_DataSet(X_training_stack,y_training_stack)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=True, num_workers=1)
+    validation_set = Dose_DataSet(X_validation_stack,y_validation_stack)
+    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=5, shuffle=True, num_workers=1)
+    mlp = MLP()
+    loss_function = nn.L1Loss()
+    optimizer = torch.optim.Adam(mlp.parameters(), lr=5e-5)
+
+    for epoch in range(0,1000):
+        print(f'Starting epoch {epoch+1}')
+        
+        for i, data in enumerate(train_loader):
+            inputs, targets = data
+            inputs, targets = inputs.float(), targets.float()
+            targets = targets.reshape((targets.shape[0], 45))
+
+            outputs = mlp(inputs)
+            
+            loss = loss_function(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad() #zero gradients
+
+        total_loss = 0
+        for i, data in enumerate(validation_loader):
+            inputs, targets = data
+            inputs, targets = inputs.float(), targets.float()
+            targets = targets.reshape((targets.shape[0], 45))
+
+            outputs = mlp(inputs)
+            
+            loss = loss_function(outputs, targets)
+            total_loss += loss.item()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad() #zero gradients
+            
+        print(f'Validation Loss: {total_loss / (i+1)}')        
+
+    
+    print("")  
+
+
+
+
+
+
+    print("Completed Training")      
 
 if __name__ == "__main__":
     torch.manual_seed(42)

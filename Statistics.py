@@ -15,15 +15,15 @@ def Get_ROI_Frequencies(file, occurrences_dict):
         with open(os.path.join(processed_path, file), "rb") as fp:
             patient : Patient = pickle.load(fp)
     except:
-        return occurrences_dict     
-    if occurrences_dict == None:
-        return None       
+        return occurrences_dict  
+
+    if getattr(patient, "ptv70") == None:
+        return occurrences_dict      
     #now such rois exist. 
     for key in occurrences_dict:
         obj = getattr(patient, key)  
         if obj != None:
             occurrences_dict[key] += 1   
-    print("")
     return occurrences_dict
 #this displays how many occurrences there are for each ROI in the patient cohort, for deciding what to use for model building
 
@@ -99,20 +99,51 @@ def Distance_Between_ROIs(roi1, roi2):
             z_slice = slice[0][2]
 
             closest_slice_idx = min(z_vals_roi2, key=lambda z:abs(z[0]-z_slice))[1]  #get the closest z value index in z_vals_roi_2
+
             closest_slice = roi2[closest_slice_idx[0]][closest_slice_idx[1]] 
 
             slice_polygon = Contour_to_Polygon(slice)
             closest_slice_polygon = Contour_to_Polygon(closest_slice)
 
             dist = Polygon_to_Polygon_Distance(slice_polygon, closest_slice_polygon)
+            dist_z = abs(z_slice - closest_slice[0][2])#also need distance in the z direction
+            dist = sqrt(dist**2 + dist_z**2)
             if dist < minDistance:
                 minDistance = dist
-    return minDistance    
+    return minDistance 
+
+def Overlap_Fraction(roi1, roi2):
+    #gets the fraction of roi1 that overlaps with roi2 as a percentage
+    intersection_area = 0
+    total_area = 0
 
 
+    z_vals_roi2 = []
+    for i, contour in enumerate(roi2):
+        for s, slice in enumerate(contour):
+            if len(slice) > 0:
+                z_vals_roi2.append([slice[0][2], [i,s]])   
+                    #each element has the z location as well as index in list
 
+    for slices in roi1:
+        for slice in slices:
+            if len(slice) == 0:
+                continue
+            slice_polygon = Contour_to_Polygon(slice)
+            total_area += slice_polygon.area
 
-             
+            z_slice = slice[0][2]
+            for i in range(len(z_vals_roi2)):
+                if abs(int(round(z_slice, 2)*100) - int(round(z_vals_roi2[i][0], 2)*100)) < 2:    #if on the same axial plane
+                    #calculate overlap if distance between isnt 0
+                    roi2_slice = roi2[z_vals_roi2[i][1][0]][z_vals_roi2[i][1][1]]
+
+                    roi2_slice_polygon = Contour_to_Polygon(roi2_slice)
+                    intersection_area += slice_polygon.intersection(roi2_slice_polygon).area
+                    break
+    overlap_area = round(intersection_area / total_area, 3) * 100         
+    return overlap_area   
+ 
 
 
 if __name__ == "__main__":
