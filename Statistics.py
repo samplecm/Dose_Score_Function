@@ -5,9 +5,65 @@ from math import cos, sin, pi
 import pickle 
 from Contours import Contours
 from Patient import Patient
+import statistics as stats
 
 patients_path = os.path.join(os.getcwd(), "Patients")
 processed_path = os.path.join(os.getcwd(), "Processed_Patients")
+
+def Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation_stack, y_validation_stack):
+    num_training_files = X_training_stack.shape[0]
+    num_validation_files = X_validation_stack.shape[0]   
+    num_features_X = X_training_stack.shape[1] 
+    num_outputs_y = y_training_stack.shape[1]
+    num_channels_X = X_training_stack.shape[2]
+    num_channels_y = y_training_stack.shape[2]
+
+    #Now for each feature and each channel, I need to go through and collect all values that aren't 1000,
+    # and then scale features that are 1000 to the maximum + 1 std
+    for f in range(num_features_X):
+        for c in range(num_channels_X):
+            values = []
+            for s, sample in enumerate(X_training_stack):
+                if X_training_stack[s, f, c] != 1000:
+                    values.append(X_training_stack[s, f, c])
+            for s, sample in enumerate(X_validation_stack):
+                if X_validation_stack[s, f, c] != 1000:
+                    values.append(X_validation_stack[s, f, c])    
+            std = stats.pstdev(values)
+            max_val = max(values)
+            #now go back through and make every value that is 1000 be max + std
+            new_none_val = round(max_val + std, 1)      
+            for s, sample in enumerate(X_training_stack):
+                if X_training_stack[s, f, c] == 1000:
+                    X_training_stack[s, f, c] = new_none_val
+            for s, sample in enumerate(X_validation_stack):
+                if X_validation_stack[s, f, c] == 1000:
+                    X_validation_stack[s, f, c] = new_none_val  
+
+
+    #Now do this for the y vals.
+    for f in range(num_outputs_y):
+        for c in range(num_channels_y):
+            values = []
+            for s, sample in enumerate(y_training_stack):
+                if y_training_stack[s, f, c] != 1000:
+                    values.append(y_training_stack[s, f, c])
+            for s, sample in enumerate(y_validation_stack):
+                if y_validation_stack[s, f, c] != 1000:
+                    values.append(y_validation_stack[s, f, c])    
+            std = stats.pstdev(values)
+            max_val = max(values)
+            #just make 1000 --> 0 for now for predictions. (best?)
+            new_none_val = round(max_val + std, 1)       
+            for s, sample in enumerate(y_training_stack):
+                if y_training_stack[s, f, c] == 1000:
+                    y_training_stack[s, f, c] = 0 #new_none_val
+            for s, sample in enumerate(y_validation_stack):
+                if y_validation_stack[s, f, c] == 1000:
+                    y_validation_stack[s, f, c] = 0
+    print("Rescaled non-existing features.") 
+    return X_training_stack, y_training_stack , X_validation_stack, y_validation_stack              
+
 
 
 def Get_ROI_Frequencies(file, occurrences_dict):

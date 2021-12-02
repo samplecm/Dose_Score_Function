@@ -8,14 +8,18 @@ from sklearn.datasets import load_boston
 from sklearn.preprocessing import StandardScaler
 import os
 import pickle 
+import Statistics
 
 class Dose_DataSet(torch.utils.data.DataLoader):
     def __init__(self, X, y, scale_data=True):
         if not torch.is_tensor(X) and not torch.is_tensor(y):
             if scale_data:
+                scale_params_X = StandardScaler().fit(X)
                 X = StandardScaler().fit_transform(X)
+                
             self.X = torch.from_numpy(X)
             self.y = torch.from_numpy(y)
+            self.scale_params = scale_params_X
 
     def __len__(self):
         return len(self.X)
@@ -50,33 +54,42 @@ def Train(path):
     training_files = files[0:num_training_files]
     validation_files = files[num_training_files:]
     num_validation_files = len(validation_files)
-    X_training_stack = np.zeros((num_training_files, 12 * 3))
-    y_training_stack = np.zeros((num_training_files, 9 * 5))
+    X_training_stack = np.zeros((num_training_files, 12 , 3))
+    y_training_stack = np.zeros((num_training_files, 9 , 5))
     for idx, file in enumerate(training_files):
         file_path = os.path.join(path, file)
         with open(file_path, "rb") as fp:
             X,y = pickle.load(fp)
-            X_training_stack[idx,:] = np.reshape(X, 12*3)
-            y_training_stack[idx, :] = np.reshape(y, 9*5)
+            X_training_stack[idx,:] = X
+            y_training_stack[idx, :] = y
             
-    X_validation_stack = np.zeros((num_validation_files, 12 * 3))
-    y_validation_stack = np.zeros((num_validation_files, 9 * 5))
+    X_validation_stack = np.zeros((num_validation_files, 12 , 3))
+    y_validation_stack = np.zeros((num_validation_files, 9 , 5))
     for idx, file in enumerate(validation_files):
         file_path = os.path.join(path, file)
         with open(file_path, "rb") as fp:
             X,y = pickle.load(fp)
-            X_validation_stack[idx,:] = np.reshape(X, 12*3)
-            y_validation_stack[idx, :] = np.reshape(y, 9*5)        
+
+            X_validation_stack[idx,:] = X
+            y_validation_stack[idx, :] = y  
+    X_training_stack, y_training_stack , X_validation_stack, y_validation_stack =  Statistics.Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation_stack, y_validation_stack)       
+      
+    #reshape arrays 
+    X_training_stack = np.reshape(X_training_stack, (X_training_stack.shape[0], X_training_stack.shape[1]*X_training_stack.shape[2]))
+    y_training_stack = np.reshape(y_training_stack, (y_training_stack.shape[0], y_training_stack.shape[1]*y_training_stack.shape[2]))
+    X_validation_stack = np.reshape(X_validation_stack, (X_validation_stack.shape[0], X_validation_stack.shape[1]*X_validation_stack.shape[2]))
+    y_validation_stack = np.reshape(y_validation_stack, (y_validation_stack.shape[0], y_validation_stack.shape[1]*y_validation_stack.shape[2]))
     
+
     #Now create a dataloader object
     train_set = Dose_DataSet(X_training_stack,y_training_stack)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=True, num_workers=1)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=1)
     validation_set = Dose_DataSet(X_validation_stack,y_validation_stack)
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=5, shuffle=True, num_workers=1)
+    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=1, shuffle=True, num_workers=1)
     mlp = MLP()
     loss_function = nn.L1Loss()
-    optimizer = torch.optim.Adam(mlp.parameters(), lr=5e-5)
-
+    optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-4)
+    loss_history = []
     for epoch in range(0,1000):
         print(f'Starting epoch {epoch+1}')
         
@@ -105,8 +118,8 @@ def Train(path):
             loss.backward()
             optimizer.step()
             optimizer.zero_grad() #zero gradients
-            
-        print(f'Validation Loss: {total_loss / (i+1)}')        
+        loss_history.append(round(total_loss / (i+1),2))    
+        print(f'Validation Loss: {round(total_loss / (i+1),2)}')        
 
     
     print("")  
