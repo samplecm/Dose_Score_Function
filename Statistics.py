@@ -17,7 +17,7 @@ def Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation
     num_outputs_y = y_training_stack.shape[1]
     num_channels_X = X_training_stack.shape[2]
     num_channels_y = y_training_stack.shape[2]
-
+    new_none_values = np.zeros((num_features_X, num_channels_X))
     #Now for each feature and each channel, I need to go through and collect all values that aren't 1000,
     # and then scale features that are 1000 to the maximum + 1 std
     for f in range(num_features_X):
@@ -33,6 +33,7 @@ def Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation
             max_val = max(values)
             #now go back through and make every value that is 1000 be max + std
             new_none_val = round(max_val + std, 1)      
+            new_none_values[f,c] = new_none_val
             for s, sample in enumerate(X_training_stack):
                 if X_training_stack[s, f, c] == 1000:
                     X_training_stack[s, f, c] = new_none_val
@@ -62,6 +63,9 @@ def Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation
                 if y_validation_stack[s, f, c] == 1000:
                     y_validation_stack[s, f, c] = 0
     print("Rescaled non-existing features.") 
+    #save the new none values
+    with open (os.path.join(os.getcwd(), "Saved_Values", "new_none_values.txt"), "wb") as fp:
+        pickle.dump(new_none_values, fp)
     return X_training_stack, y_training_stack , X_validation_stack, y_validation_stack              
 
 

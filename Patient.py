@@ -28,17 +28,19 @@ class Patient():
         self.submandibular_left = None
         self.thyroid = None
         self.retina = None
-        self.ptv70 = None
-        self.ptv63 = None
-        self.ptv56 = None
-        self.ptv54 = None
-        self.ptv55 = None
-        self.ptv30 = None
-        self.ptv35 = None
-        self.ptv40 = None
-        self.ptv45 = None
-        self.ptv50 = None
-        self.ptv60 = None
+        self.dicom_structures = []
+        self.PTVs = {}
+        # self.ptv70 = None
+        # self.ptv63 = None
+        # self.ptv56 = None
+        # self.ptv54 = None
+        # self.ptv55 = None
+        # self.ptv30 = None
+        # self.ptv35 = None
+        # self.ptv40 = None
+        # self.ptv45 = None
+        # self.ptv50 = None
+        # self.ptv60 = None
 
 
 

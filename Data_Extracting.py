@@ -13,6 +13,10 @@ import copy
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 from shapely.geometry.polygon import Polygon
+import random
+import re
+import Chopper
+import Visuals
 
 
 patients_path = os.path.join(os.getcwd(), "Patients")
@@ -44,73 +48,38 @@ def Get_HN_Patients():
         "thyroid", 
         "retina"
     ]
-    ptvs = ["30", "35", "40", "45", "50", "54", "55", "60", "70", "63", "56"] 
+    
 
-    training_list = ["brainstem", "larynx", "mandible", "oral_cavity", "parotid_left", 
-                    "parotid_right", "spinal_cord", "submandibular_right", "submandibular_left"]
 
-    roi_list = CloneList(organs)
-    for i in range(len(ptvs)):
-        ptvs[i] = str("ptv" + str(ptvs[i]))
-    roi_list.extend(CloneList(ptvs))
     patients = os.listdir(patients_path)
+    #random.shuffle(patients)
     processed_Files = os.listdir(processed_path)
-    occurrences_dict = dict.fromkeys(roi_list, 0)
-    # for patient in patients:
-    #     print("Getting OARs for " + patient)
-    #     patient_path = os.path.join(patients_path, patient)
-        # dose_array = Get_Dose_Array(patient, patient_path)
+    occurrences_dict = dict.fromkeys(organs, 0)
+    for patient in patients:
+        print("Getting OARs for " + patient)
+
+        patient_path = os.path.join(patients_path, patient)
+        processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
+        dose_array = Get_Dose_Array(patient, patient_path)
         # if dose_array is None:
         #    continue
-        # GetContours(patient, patient_path, organs)
-        # GetPTVs(patient, patient_path, ptvs)
-        # Get_ROI_to_PTV_Distances(patient, organs, ptvs)
-        #Get_DVHs(patient, organs, ptvs, dose_array)
+        processed_patient = GetContours(patient, patient_path, organs)
+        processed_patient = GetPTVs(patient, patient_path)
+        processed_patient = Get_DVHs(patient, organs, dose_array)
+        processed_patient = Get_Training_Data(patient, organs)
+        
         #Now need the dose stats
-        #print("")
+        print(f"Finished collecting data for {patient}")
+
     for file in processed_Files:    
         occurrences_dict = Statistics.Get_ROI_Frequencies(file, occurrences_dict)
-        Get_Training_Data(file, training_list)
+        #Get_Training_Data(file, training_list)
     print("Finished processing data for head and neck patients")
 
 def Get_Training_Data(file, roi_list):
-    X = np.ones((12,3)) * 1000 #9 oars, 3 ptv distances for each
-    #First, return without saving if there is no ptv70. 
-    # Last 3 features is volume dose for ptv56,63,70
-    y = np.ones((9, 5)) * 1000 #9 rois, 6 dose features each
-    try:
-        with open(os.path.join(processed_path, file), "rb") as fp:
-            patient : Patient = pickle.load(fp)
-    except:
-        return 
-    if getattr(patient, "ptv70") is None:
-        return
-
-    for i, oar in enumerate(roi_list):
-        org : Contours = getattr(patient, oar)
-        if org != None:
-            ptv70_dist = float(1000 if org.ptv70_dist is None else round(org.ptv70_dist,2))
-            ptv63_dist = float(1000 if org.ptv63_dist is None else round(org.ptv63_dist,2))
-            ptv56_dist = float(1000 if org.ptv56_dist is None else round(org.ptv56_dist,2))
-            dose_vals = [1000]*5 if org.dose is None else org.dose
-            dose_vals = list(dose_vals.values())[1:]
-            dose_vals = [round(float(j),2) for j in dose_vals]
-            X[i, :] = np.array([ptv70_dist, ptv63_dist, ptv56_dist]) 
-            y[i,:] = np.array(dose_vals)  
-    
-    for p, ptv in enumerate(["56", "63", "70"]):
-        ptv : Contours= getattr(patient, str("ptv" + ptv))
-        if ptv is None:
-            continue
-        ptv_volume_dose = 1000 if ptv.volume_dose is None else ptv.volume_dose
-        ptv_volume_dose = list(ptv_volume_dose.values())
-        ptv_volume_dose = [round(float(val),2) for val in ptv_volume_dose]
-        X[p+9,:] = np.array(ptv_volume_dose)
-
-    save_path = os.path.join(training_Path, file)
-    with open(save_path, "wb") as fp:
-        pickle.dump([X, y], fp)
+    #Calculating training data. 
     print("Finished getting training data for " + file)
+
 
 def Get_DVHs(patient_name, organs, ptvs, dose_array):    
     processed_patient_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Research/Processed_Patients"
@@ -165,10 +134,11 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
             setattr(organ_obj, "dose", dose)
             setattr(patient, organ, organ_obj)        
 
-
+    patient_ptvs = patient.PTVs
     for ptv in ptvs:
-        ptv_obj = getattr(patient, str("ptv" + str(ptv)))  
-        if ptv_obj == None:
+        try:
+            ptv_obj = patient_ptvs[ str("ptv" + str(ptv))]
+        except:
             continue
         ptv_contours = ptv_obj.wholeROI
         print("Getting masks for " + ptv)
@@ -208,7 +178,7 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
             #for ptvs I also want V95, V97, V99.
             volume_dose = Get_PTV_Volume_Doses(ptv_dose_pixels, float(ptv))
             setattr(ptv_obj, "volume_dose", volume_dose)
-            setattr(patient, str("ptv" + str(ptv)), ptv_obj)
+            patient.PTVs[str("ptv" + str(ptv))] = ptv_obj
 
     try:        
         with open(os.path.join(processed_patient_path, patient_name), "wb") as fp:
@@ -272,7 +242,10 @@ def Get_DVH_Bins(list, num_bins=20):
 def Get_Dose_Array(patient, patient_path):
     print("Getting dose array for " + patient)
     files = glob.glob(os.path.join(patient_path, "*"))
+    
+    
     #sometimes there is a nested study directory here instead of the file list. in that case need to move in one more level
+    doseFile = None
     if len(files) <= 2:
         files = glob.glob(os.path.join(files[0],  "*.dcm"))
     else:
@@ -284,11 +257,17 @@ def Get_Dose_Array(patient, patient_path):
 
 
     for file in files:
-        patientData = pydicom.dcmread(file)
-        modality = patientData[0x0008,0x0060].value 
-        if "DOSE" in modality:
-            doseFile = patientData
-            break
+        try:
+            patientData = pydicom.dcmread(file)
+            modality = patientData[0x0008,0x0060].value 
+            if "DOSE" in modality:
+                doseFile = patientData
+                break
+        except:
+            continue 
+    if doseFile == None:
+        print("No dose array found for " + patient)
+        return None       
     dose_array = patientData.pixel_array * float(patientData[0x3004, 0x000E].value) #Dose Grid Scaling Attribute
     dose_units = patientData[0x3004, 0x0002].value
     if dose_units != "GY":
@@ -387,8 +366,9 @@ def Get_ROI_to_PTV_Distances(patient_name, organs, ptvs):
         else:
             organ_contours = organ_obj.wholeROI
         for ptv in ptvs:
-            ptv_obj = getattr(patient, str("ptv" + str(ptv)))  
-            if ptv_obj == None:
+            try:
+                ptv_obj = patient.PTVs[str("ptv" + str(ptv))]
+            except:
                 continue
             else:
                 ptv_contours = ptv_obj.wholeROI
@@ -406,8 +386,16 @@ def Get_ROI_to_PTV_Distances(patient_name, organs, ptvs):
 
     print("")
 
-def GetPTVs(patient, patient_path, ptvs): 
-
+def GetPTVs(patient, patient_path): 
+    processed_patient_path = os.path.join(os.getcwd(),"Processed_Patients")
+    if os.path.exists(os.path.join(processed_patient_path, patient)):
+        try:
+            with open(os.path.join(processed_patient_path, patient), "rb") as fp:
+                processed_patient = pickle.load(fp)
+        except:
+            processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
+    else:
+        processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))   
     files = glob.glob(os.path.join(patient_path, "*"))
     structFiles = [] 
     #sometimes there is a nested study directory here instead of the file list. in that case need to move in one more level
@@ -422,8 +410,8 @@ def GetPTVs(patient, patient_path, ptvs):
         if "STRUCT" in modality:
             structFiles.append(file)   
     noPTVs = True        
-    for ptv in ptvs:
-        structures, structure_roi_nums, struct_idxs = FindPTVs(structFiles, ptv)    
+    for ptv in range(20, 81):
+        structures, structure_roi_nums, struct_idxs, ptv_types = FindPTVs(structFiles, ptv)    
         if structure_roi_nums != 1111:
             noPTVs = False
         else: continue    
@@ -431,13 +419,14 @@ def GetPTVs(patient, patient_path, ptvs):
         contourList = []
         for idx in range(len(structures)):
             structure = structures[idx]
+            ptv_type = ptv_types[idx]
             structure_roi_num = structure_roi_nums[idx]
             struct_idx = struct_idxs[idx]
             
             structsMeta = pydicom.dcmread(structFiles[struct_idx]).data_element("ROIContourSequence")                    
             for contourInfo in structsMeta:
                 if contourInfo.get("ReferencedROINumber") == structure_roi_num: #get the matched contour for the given organ
-                    print(str("saving PTV" + ptv + " contours to " + patient + ". Matched structure: " + structure))
+                    print(str("saving PTV" + str(ptv) + " contours to " + patient + ". Matched structure: " + structure + ", type = " + ptv_type))
                     
                     try: #sometimes in this dataset, contoursequence dne
                         for contoursequence in contourInfo.ContourSequence: 
@@ -466,20 +455,15 @@ def GetPTVs(patient, patient_path, ptvs):
                             if slice_exists == False:        
                                 contourList.append([tempContour])  
 
-                        contours = Contours(str("ptv" + str(ptv)), structure, contourList)   
+                        ptv_name = str("ptv" + str(ptv))
+                        if ptv_type != "reg":
+                            ptv_name += str("_" + ptv_type)
+                        contours = Contours(ptv_name, structure, contourList)   
                         #now save contours to patient object. 
-                        processed_patient_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Research/Processed_Patients"
-                        if os.path.exists(os.path.join(processed_patient_path, patient)):
-                            try:
-                                with open(os.path.join(processed_patient_path, patient), "rb") as fp:
-                                    processed_patient = pickle.load(fp)
-                            except:
-                                processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
-                        else:
-                            processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
+                         
 
                         try:
-                            setattr(processed_patient, str("ptv" + str(ptv)) , contours)   
+                            processed_patient.PTVs.setdefault(ptv_name, []).append(contours)  
                         except:
                             print("No contours saved to file.")
                         #save
@@ -491,6 +475,7 @@ def GetPTVs(patient, patient_path, ptvs):
     if noPTVs:
         print("PTV" + str(ptv) + " not found.")
         Print_all_PTVs(structFiles)
+    return processed_patient
 
  
 def Print_all_PTVs(structureList):
@@ -506,24 +491,61 @@ def FindPTVs(structureList, ptv):
     names = []
     roiNums = []
     fileNums = []
+    ptv_types = []
     found = False
     for fileNum, file in enumerate(structureList):        
         roiSequence = pydicom.dcmread(file).data_element("StructureSetROISequence")
         for element in roiSequence:
-            if "ptv" in element.get("ROIName").lower() and str(ptv) in element.get("ROIName").lower():
-                print("Found PTV" + str(ptv) + " as " + element.get("ROIName"))
+            ptv_name = element.get("ROIName").lower()
+            #print(element.get("ROIName").lower())
+            allowed, ptv_type = AllowedToMatchPTVS(ptv_name, str(ptv))
+            if allowed==True:
+                #don't take ptv if "all" in it, because its a duplicate
+                print(f"Found PTV {ptv} as {ptv_name}. Type = {ptv_type}")
                 found = True
                 roiNumber = element.get("ROINumber")
-                names.append(element.get("ROIName").lower())
+                names.append(ptv_name)
                 roiNums.append(roiNumber)
                 fileNums.append(fileNum)
+                ptv_types.append(ptv_type)
+
+                if "all" in ptv_name:
+                    #if combined boolean ptv then dont need to save other ptvs
+                    print(f"Found combined \"all\" PTV{ptv}.")
+                    names.clear()
+                    roiNums.clear()
+                    fileNums.clear()
+
+                    names.append(ptv_name)
+                    roiNums.append(roiNumber)
+                    fileNums.append(fileNum)
+                    ptv_types.append(ptv_type)
+
+                    return names, roiNums, fileNums, ptv_types  
     
     if found == False:
-        return [], 1111, 0
-    return names, roiNums, fileNums    
+        return [], 1111, 0, "reg"
+    return names, roiNums, fileNums, ptv_types   
+
+
+def Print_DICOM_Structures(structureList):
+    for fileNum, file in enumerate(structureList):        
+        roiSequence = pydicom.dcmread(file).data_element("StructureSetROISequence")
+        for element in roiSequence:
+            name = element.get("ROIName").lower()
+            print(name.lower())
 
 def GetContours(patient, patient_path, organs): 
     #save contour list for specified organ for all patients to patient binary file
+    processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
+    if os.path.exists(os.path.join(processed_patient_path, patient)):
+        try:
+            with open(os.path.join(processed_patient_path, patient), "rb") as fp:
+                processed_patient = pickle.load(fp)
+        except:
+            processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
+    else:
+        processed_patient = Patient(patient, str(os.path.join(patient_path, patient))) 
 
     files = glob.glob(os.path.join(patient_path, "*"))
     structFiles = [] 
@@ -537,57 +559,89 @@ def GetContours(patient, patient_path, organs):
         patientData = pydicom.dcmread(file)
         modality = patientData[0x0008,0x0060].value 
         if "STRUCT" in modality:
-            structFiles.append(file)     
+            structFiles.append(file)  
+
     for organ in organs:         
         print("Looking for " + organ + "...")    
-        structure, structure_roi_num, struct_idx = FindStructure(structFiles, organ)
+        structure, structure_roi_num, struct_idx, dicom_names = FindStructure(structFiles, organ)
+
+        if structure_roi_num == 1111:    
+            print(f"{organ} not found.")
+            continue 
+
+        if "stem" in organ:    #only save attribute once, when looking for brain-stem.
+            processed_patient.dicom_structures = dicom_names
+
+        structsMeta = pydicom.dcmread(structFiles[struct_idx]).data_element("ROIContourSequence")        
+        contourList = []
+        for contourInfo in structsMeta:
+            if contourInfo.get("ReferencedROINumber") == structure_roi_num: #get the matched contour for the given organ
+                
+                
+                try: #sometimes in this dataset, contoursequence dne
+                    for contoursequence in contourInfo.ContourSequence: 
+                        contour_data = contoursequence.ContourData
+                except: 
+                    print("No contour Sequence.")
+                        #But this is easier to work with if we convert from a 1d to a 2d list for contours ( [ [x1,y1,z1], [x2,y2,z2] ... ] )
+                for contoursequence in contourInfo.ContourSequence: 
+                    contour_data = contoursequence.ContourData
+                    tempContour = []
+                    i = 0
+                    if len(contour_data) > 3:
+                        z = float(contour_data[2])
+                    while i < len(contour_data):
+                        x = float(contour_data[i])
+                        y = float(contour_data[i + 1])                             
+                        tempContour.append([x, y, z ])
+                        i += 3    
+                    #first look to see if a contour at z value already exists
+                    slice_exists = False
+                    for element in contourList:
+                        try:
+                            if element[0][0][2] == z: #check z value of first point in first island of slice
+                                element.append(tempContour)     
+                                #add list as another island at slice if slice exists
+                                slice_exists = True
+                                
+                                break                                 
+                                                            
+                        except:
+                            print("Warning: error occurred when checking if ROI already had a contour at the z value: " + str(z))
+                    if slice_exists == False:        
+                        contourList.append([tempContour]) 
+                
+                contours = Contours(organ, structure, contourList)   
+                print("Segmenting contours...")
+
+                #perform segmentation
+                #
+                #if organ is spinal cord, then segmentation is different (divided into 2cm chunks...)
+                if organ=="spinal_cord":
+                    Chopper.CordChopper(contours)
+                else:    
+                    Chopper.OrganChopper(contours, [2,2,2])
+                #now save contours to patient object. 
+                    
+
+                try:
+                    setattr(processed_patient, organ, contours)   
+                except:
+                    print("No contours saved to file.")
+                #save
+                print(str("saving " + organ + " contours to " + patient + ". Matched structure: " + structure))
+                with open(os.path.join(processed_patient_path, patient), "wb") as fp:
+                    pickle.dump(processed_patient, fp)
+                    
+
+    #also look for the opti structures
+    for organ in organs:         
+        print("Looking for opti structure for " + organ + " ...")    
+        structure, structure_roi_num, struct_idx, dicom_names = FindStructure(structFiles, str(organ + "_opti"))
         #confirm match
         inp = ""
-        # if structure != "":
-        #     while True:
-        #         try:
-        #             inp = input(patient + ": matched structure for " + organ + " is " + structure + ". Is this correct? y/n")
-        #             if inp == "y":
-        #                 print("accepted.")
-        #                 break    
-        #             elif inp == "n":
-        #                 print("rejected")
-        #                 break             
-        #         except KeyboardInterrupt:
-        #             quit()
-        #         except: pass 
-        #If a structure isn't found, deal with it accordingly    
-        # if structure_roi_num == 1111 or inp == "n":
-        #     roi_options = []
-        #     roi_options_names = []
-        #     struct_files_idx = []
-        #     for struct_idx, struct in enumerate(structFiles):
-        #         roiSequence = pydicom.dcmread(struct).data_element("StructureSetROISequence")               
-        #         for element in roiSequence:
-        #             i = element.get("ROINumber")
-        #             roi_options.append(i)
-        #             roi_options_names.append(element.get("ROIName").lower())
-        #             struct_files_idx.append(struct_idx)
-        #             print(str(i+1) + ": " + element.get("ROIName").lower())
-        #     print("Could not automatically find " + organ + ". Continue or choose an organ option or press 0 to continue without.")
-
-            # while True:
-            #     try:
-            #         inp = input("Enter an option: \n")
-            #         if int(inp) == 0:
-            #             print(organ + " does not exist. skipping.")
-            #             break
-            #         if int(inp)-1 in roi_options:
-            #             struct_idx = struct_files_idx[roi_options.index(int(inp)-1)] 
-            #             structure_roi_num = int(inp)
-            #             structure = roi_options_names[roi_options.index(int(inp)-1)] 
-            #             break        
-
-            #     except KeyboardInterrupt:
-            #         quit()
-            #     except: pass 
         if structure_roi_num == 1111:    
-            print("No structure found.")
+            print(f"{organ} not found.")
             continue #nothing to save to the patient
             # else:
             #     print("Continuing with organ: " + str(structure))
@@ -596,7 +650,7 @@ def GetContours(patient, patient_path, organs):
         contourList = []
         for contourInfo in structsMeta:
             if contourInfo.get("ReferencedROINumber") == structure_roi_num: #get the matched contour for the given organ
-                print(str("saving " + organ + " contours to " + patient + ". Matched structure: " + structure))
+                print(str("saving " + organ + " opti contours to " + patient + ". Matched structure: " + structure))
                 
                 try: #sometimes in this dataset, contoursequence dne
                     for contoursequence in contourInfo.ContourSequence: 
@@ -628,25 +682,19 @@ def GetContours(patient, patient_path, organs):
                     
                     contours = Contours(organ, structure, contourList)   
                     #now save contours to patient object. 
-                    processed_patient_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Research/Processed_Patients"
-                    if os.path.exists(os.path.join(processed_patient_path, patient)):
-                        try:
-                            with open(os.path.join(processed_patient_path, patient), "rb") as fp:
-                                processed_patient = pickle.load(fp)
-                        except:
-                            processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
-                    else:
-                        processed_patient = Patient(patient, str(os.path.join(patient_path, patient)))    
+                       
 
                     try:
-                        setattr(processed_patient, organ, contours)   
+                        setattr(processed_patient, str("opti_" + organ), contours)   
                     except:
                         print("No contours saved to file.")
                     #save
                     with open(os.path.join(processed_patient_path, patient), "wb") as fp:
                         pickle.dump(processed_patient, fp)
                 except: 
-                    print("No contour Sequence.")
+                    print("No contour Sequence.")                
+    
+    return processed_patient                
                 
                 
 
@@ -663,9 +711,9 @@ def FindStructure(structureList, organ, invalidStructures = []):
             structure cannot be, defaults to an empty list
 
     Returns: 
-        str, int: the matching structure's name in the metadata, the 
-            matching structure's ROI number in the metadata. Returns "", 
-            1111 if no matching structure is found in the metadata
+        str, int, int, list: the matching structure's name in the metadata, the 
+            matching structure's ROI number in the metadata, the index indicating which structure file has the structure, and a list of all dicom structure names found. Returns "", 
+            1111, 0, list if no matching structure is found in the metadata
         
     """
 
@@ -685,11 +733,13 @@ def FindStructure(structureList, organ, invalidStructures = []):
                 #first check if need to do special matching for limbus name:
                 if element.get("ROIName").lower() == "sm_l" and organ  == "Left Submandibular":
                     roiNumber = element.get("ROINumber")
-                    return element.get("ROIName").lower(), roiNumber, fileNum
+                    return element.get("ROIName").lower(), roiNumber, fileNum, []
                 if element.get("ROIName").lower() == "sm_r" and organ  == "Right Submandibular":
                     roiNumber = element.get("ROINumber")
-                    return element.get("ROIName").lower(), roiNumber, fileNum    
-                unfilteredStructures.append(element.get("ROIName").lower())        
+                    return element.get("ROIName").lower(), roiNumber, fileNum, []    
+                
+                unfilteredStructures.append(element.get("ROIName").lower())  
+               
     #Now find which is the best fit.
     #First filter out any structures without at least a 3 character substring in common
     structures = []
@@ -713,7 +763,7 @@ def FindStructure(structureList, organ, invalidStructures = []):
                 break
     
     if len(closestStrings) == 0:
-        return "", 1111, 0    
+        return "", 1111, 0, unfilteredStructures   
     #Now return the organ that is remaining and has closest string
     fileNum = -1
     for file in structureList:
@@ -723,9 +773,33 @@ def FindStructure(structureList, organ, invalidStructures = []):
             if element.get("ROIName").lower() == closestStrings[0][0]:
                 roiNumber = element.get("ROINumber")
     try:
-        return closestStrings[0][0], roiNumber, fileNum
+        return closestStrings[0][0], roiNumber, fileNum, unfilteredStructures
     except:
-        return "", 1111, 0 #error code for unfound match.                                                                                                          
+        return "", 1111, 0, unfilteredStructures #error code for unfound match.                                                                                                          
+
+def AllowedToMatchPTVS(s1, ptv):
+    allowed=True
+    ptv_type = "reg"
+    s1 = s1.lower()
+    ptv = ptv.lower()
+    if "ptv" not in s1 or ptv not in s1:
+        allowed=False
+        return False, ptv_type
+    
+    keywords = []
+    keywords.append("opti")
+    for keyword in keywords:
+        if keyword in s1:
+            return False, ptv_type 
+ 
+    #its tricky matching up left and right organs sometimes with all the conventions used... this makes sure that both are left or both are right
+    if (("_l_" in s1) or (" l " in s1) or  (" l-" in s1) or ("-l-" in s1) or (" l_" in s1) or ("_l " in s1) or ("-l " in s1) or ("left" in s1) or ("l " == s1[0:2]) or ("_lt_" in s1) or 
+        (" lt " in s1) or  (" lt-" in s1) or ("-lt-" in s1) or (" lt_" in s1) or ("_lt " in s1) or ("-lt " in s1) or ("lt " == s1[0:3]) or ("_l" == s1[-2:]) or (re.search("\d[-_]?l ", s1) != None) or (s1[-1] == "l" and s1[-2].isdigit())):
+        ptv_type = "L"
+      
+    if ("_r_" in s1) or (" r " in s1) or  (" r-" in s1) or ("-r-" in s1) or (" r_" in s1) or ("_r " in s1) or ("-r " in s1) or ("right" in s1) or ("r " == s1[0:2])or ("_rt_" in s1) or (" rt " in s1) or  (" rt-" in s1) or ("-rt-" in s1) or (" rt_" in s1) or ("_rt " in s1) or ("-rt " in s1)or ("right" in s1) or ("_r" == s1[-2:]) or (re.search("\d[-_]?r ", s1) != None) or (s1[-1] == "r" and s1[-2].isdigit()):
+        ptv_type = "R"
+    return allowed, ptv_type        
 
 def AllowedToMatch(s1, s2):
     """Determines whether or not s1 and s2 are allowed to match 
@@ -792,18 +866,22 @@ def AllowedToMatch(s1, s2):
         if "l" not in s1:
             allowed = False    
     #its tricky matching up left and right organs sometimes with all the conventions used... this makes sure that both are left or both are right
-    if ("_l_" in s1) or (" l " in s1) or  (" l-" in s1) or ("-l-" in s1) or (" l_" in s1) or ("_l " in s1) or ("-l " in s1) or ("left" in s1) or ("l " == s1[0:2]) or ("_lt_" in s1) or (" lt " in s1) or  (" lt-" in s1) or ("-lt-" in s1) or (" lt_" in s1) or ("_lt " in s1) or ("-lt " in s1) or ("lt " == s1[0:3]) or ("_l" == s1[-2:]):
-        if not (("lpar" in s2) or ("lsub" in s2) or ("_l_" in s2) or (" l " in s2) or  (" l-" in s2) or ("-l-" in s2) or (" l_" in s2) or ("_l " in s2) or ("-l " in s2) or ("left" in s2) or ("l " == s2[0:2])or ("_lt_" in s2) or (" lt " in s2) or  (" lt-" in s2) or ("-lt-" in s2) or (" lt_" in s2) or ("_lt " in s2) or ("-lt " in s2) or ("lt " == s2[0:3]) or ("_l" == s2[-2:])):   
+    if (("_l_" in s1) or (" l " in s1) or  (" l-" in s1) or ("-l-" in s1) or (" l_" in s1) or ("_l " in s1) or ("-l " in s1) or ("left" in s1) or ("l " == s1[0:2]) or ("_lt_" in s1) or 
+        (" lt " in s1) or  (" lt-" in s1) or ("-lt-" in s1) or (" lt_" in s1) or ("_lt " in s1) or ("-lt " in s1) or ("lt " == s1[0:3]) or ("_l" == s1[-2:]) or (re.search("\d[-_]?l ", s1) != None)):
+        if not (("lpar" in s2) or ("lsub" in s2) or ("_l_" in s2) or (" l " in s2) or  (" l-" in s2) or ("-l-" in s2) or (" l_" in s2) or ("_l " in s2) or ("-l " in s2) or ("left" in s2) or 
+            ("l " == s2[0:2])or ("_lt_" in s2) or (" lt " in s2) or  (" lt-" in s2) or ("-lt-" in s2) or (" lt_" in s2) or ("_lt " in s2) or ("-lt " in s2) or ("lt " == s2[0:3]) or ("_l" == s2[-2:]) or (re.search("\d[-_]?l ", s2) != None)):   
             allowed = False  
-    if (("_l_" in s2) or (" l " in s2) or  (" l-" in s2) or ("-l-" in s2) or (" l_" in s2) or ("_l " in s2) or ("-l " in s2) or ("left" in s2) or ("l " == s2[0:2])or ("_lt_" in s2) or (" lt " in s2) or  (" lt-" in s2) or ("-lt-" in s2) or (" lt_" in s2) or ("_lt " in s2) or ("-lt " in s2)or ("lt " == s2[0:3]) or ("_l" == s2[-2:])):  
-        if not (("lpar" in s1) or ("lsub" in s1) or ("_l_" in s1) or (" l " in s1) or  (" l-" in s1) or ("-l-" in s1) or (" l_" in s1) or ("_l " in s1) or ("-l " in s1) or ("left" in s1) or ("l " == s1[0:2]) or ("_lt_" in s1) or (" lt " in s1) or  (" lt-" in s1) or ("-lt-" in s1) or (" lt_" in s1) or ("_lt " in s1) or ("-lt " in s1) or ("lt " == s1[0:3]) or ("_l" == s1[-2:])):
+    if (("_l_" in s2) or (" l " in s2) or  (" l-" in s2) or ("-l-" in s2) or (" l_" in s2) or ("_l " in s2) or ("-l " in s2) or ("left" in s2) or ("l " == s2[0:2])or ("_lt_" in s2) or (" lt " in s2) 
+    or  (" lt-" in s2) or ("-lt-" in s2) or (" lt_" in s2) or ("_lt " in s2) or ("-lt " in s2)or ("lt " == s2[0:3]) or ("_l" == s2[-2:]) or (re.search("\d[-_]?l ", s2))):  
+        if not (("lpar" in s1) or ("lsub" in s1) or ("_l_" in s1) or (" l " in s1) or  (" l-" in s1) or ("-l-" in s1) or (" l_" in s1) or ("_l " in s1) or ("-l " in s1) or ("left" in s1) or ("l " == s1[0:2]) or 
+        ("_lt_" in s1) or (" lt " in s1) or  (" lt-" in s1) or ("-lt-" in s1) or (" lt_" in s1) or ("_lt " in s1) or ("-lt " in s1) or ("lt " == s1[0:3]) or ("_l" == s1[-2:]) or (re.search("\d[-_]?l ", s1))):
             allowed = False        
     
-    if ("_r_" in s1) or (" r " in s1) or  (" r-" in s1) or ("-r-" in s1) or (" r_" in s1) or ("_r " in s1) or ("-r " in s1) or ("right" in s1) or ("r " == s1[0:2])or ("_rt_" in s1) or (" rt " in s1) or  (" rt-" in s1) or ("-rt-" in s1) or (" rt_" in s1) or ("_rt " in s1) or ("-rt " in s1)or ("right" in s1) or ("_r" == s1[-2:]):
-        if not (("rpar" in s2) or ("rsub" in s2) or ("_r_" in s2) or (" r " in s2) or  (" r-" in s2) or ("-r-" in s2) or (" r_" in s2) or ("_r " in s2) or ("-r " in s2) or ("right" in s2) or ("r " == s2[0:2]) or ("_rt_" in s2) or (" rt " in s2) or  (" rt-" in s2) or ("-rt-" in s2) or (" rt_" in s2) or ("_rt " in s2) or ("-rt" in s2) or ("_r" == s2[-2:])):   
+    if ("_r_" in s1) or (" r " in s1) or  (" r-" in s1) or ("-r-" in s1) or (" r_" in s1) or ("_r " in s1) or ("-r " in s1) or ("right" in s1) or ("r " == s1[0:2])or ("_rt_" in s1) or (" rt " in s1) or  (" rt-" in s1) or ("-rt-" in s1) or (" rt_" in s1) or ("_rt " in s1) or ("-rt " in s1)or ("right" in s1) or ("_r" == s1[-2:]) or (re.search("\d[-_]?r ", s1)):
+        if not (("rpar" in s2) or ("rsub" in s2) or ("_r_" in s2) or (" r " in s2) or  (" r-" in s2) or ("-r-" in s2) or (" r_" in s2) or ("_r " in s2) or ("-r " in s2) or ("right" in s2) or ("r " == s2[0:2]) or ("_rt_" in s2) or (" rt " in s2) or  (" rt-" in s2) or ("-rt-" in s2) or (" rt_" in s2) or ("_rt " in s2) or ("-rt" in s2) or ("_r" == s2[-2:]) or (re.search("\d[-_]?r ", s2))):   
             allowed = False
-    if (("_r_" in s2) or (" r " in s2) or  (" r-" in s2) or ("-r-" in s2) or (" r_" in s2) or ("_r " in s2) or ("-r " in s2) or ("right" in s2) or ("r " == s2[0:2]) or ("_rt_" in s2) or (" rt " in s2) or  (" rt-" in s2) or ("-rt-" in s2) or (" rt_" in s2) or ("_rt " in s2) or ("-rt" in s2) or ("_r" == s2[-2:])): 
-        if not (("rpar" in s1) or ("rsub" in s1) or ("_r_" in s1) or (" r " in s1) or  (" r-" in s1) or ("-r-" in s1) or (" r_" in s1) or ("_r " in s1) or ("-r " in s1) or ("right" in s1) or ("r " == s1[0:2])or ("_rt_" in s1) or (" rt " in s1) or  (" rt-" in s1) or ("-rt-" in s1) or (" rt_" in s1) or ("_rt " in s1) or ("-rt " in s1) or ("_r" == s1[-2:])):
+    if (("_r_" in s2) or (" r " in s2) or  (" r-" in s2) or ("-r-" in s2) or (" r_" in s2) or ("_r " in s2) or ("-r " in s2) or ("right" in s2) or ("r " == s2[0:2]) or ("_rt_" in s2) or (" rt " in s2) or  (" rt-" in s2) or ("-rt-" in s2) or (" rt_" in s2) or ("_rt " in s2) or ("-rt" in s2) or ("_r" == s2[-2:]) or (re.search("\d[-_]?r ", s2))): 
+        if not (("rpar" in s1) or ("rsub" in s1) or ("_r_" in s1) or (" r " in s1) or  (" r-" in s1) or ("-r-" in s1) or (" r_" in s1) or ("_r " in s1) or ("-r " in s1) or ("right" in s1) or ("r " == s1[0:2])or ("_rt_" in s1) or (" rt " in s1) or  (" rt-" in s1) or ("-rt-" in s1) or (" rt_" in s1) or ("_rt " in s1) or ("-rt " in s1) or ("_r" == s1[-2:]) or (re.search("\d[-_]?r ", s1))):
             allowed = False
     return allowed
 
