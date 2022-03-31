@@ -9,6 +9,7 @@ def CloneList(list):
 
 def CordChopper(contours: Contours):
     #this  function chops the spinal cord axially into chunks of 2cm vertical length. This starts from the top of the cord, and any remaining <2cm chunk left at the bottom is ignored. 
+    print("Subsegmenting spinal cord ... ")
     max_z = -10000
     min_z = 10000
     orig_contours = copy.deepcopy(contours.wholeROI)
@@ -57,6 +58,7 @@ def CordChopper(contours: Contours):
 
 
 def OrganChopper(contours : Contours, numCuts):
+    print(f"Subsegmenting {contours.roiName} ...")
     #chop into 18ths
     numCutsX = numCuts[0]
     numCutsY = numCuts[1]
@@ -389,18 +391,36 @@ def ClosestContourZ(z, contours):
     return closestContours        
 
 
-def ClosestPoint(point, contour):
-    m = 1000
-    closestPointIdx = 1000
-    for polygon in contour:
-        for i in range(len(polygon)):
-            diff = math.sqrt((point[0] - polygon[i][0])**2 + (point[1] - polygon[i][1])**2)
-            if diff < m:
-                closestPointIdx = i
-                m = diff
-    if closestPointIdx == 1000:
-        raise Exception("Could not find closest point.")
-    return contour[0][closestPointIdx]    
+def ClosestPoint(point, contour, island_idx=None):
+    if island_idx == None:
+        m = 1000
+        closestPointIdx1 = 1000
+        closestPointIdx2 = 1000
+        for p, polygon in enumerate(contour):
+            for i in range(len(polygon)):
+                diff = math.sqrt((point[0] - polygon[i][0])**2 + (point[1] - polygon[i][1])**2)
+                if diff < m:
+                    closestPointIdx1 = p
+                    closestPointIdx2 = i
+                    m = diff
+        if closestPointIdx1 == 1000:
+            raise Exception("Could not find closest point.")
+        return contour[closestPointIdx1][closestPointIdx2]    
+    else:   
+        m = 1000
+        closestPointIdx = 1000
+        try:
+            for i in range(len(contour)):
+                diff = math.sqrt((point[0] - contour[i][0])**2 + (point[1] - contour[i][1])**2)
+                if diff < m:
+                    closestPointIdx = i
+                    m = diff
+            if closestPointIdx == 1000:
+                raise Exception("Could not find closest point.")
+            return contour[closestPointIdx]        
+        except IndexError:
+            return None        
+        
 
 def InterpolateXY(point1, point2, z):
     if point1[2] == z:

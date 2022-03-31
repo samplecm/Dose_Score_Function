@@ -30,6 +30,7 @@ class Patient():
         self.retina = None
         self.dicom_structures = []
         self.PTVs = {}
+    
         # self.ptv70 = None
         # self.ptv63 = None
         # self.ptv56 = None
