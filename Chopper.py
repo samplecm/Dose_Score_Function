@@ -3,9 +3,31 @@ from typing import final
 from Contours import Contours
 import copy
 import Segmentation
+import time
 def CloneList(list):
     listCopy = copy.deepcopy(list)
     return listCopy  
+
+def MandibleChopper(contours):
+    print("Sub-segmenting Mandible... ")
+    finalContours = []
+    contoursX = []
+
+    contoursX = XChop(contours.wholeROI, 5)
+    # contoursX = list(filter(lambda layer: layer != [[]], contours))
+    # contours.sort(key=Chopper.GetZVal)  
+    for j in range(len(contoursX)):
+        temp = ZChop(contoursX[j], 1)
+        for j in range(len(temp)):
+            finalContours.append(copy.deepcopy(temp[j]))
+
+     
+    
+    #Now I want to separate any connected islands into separate contours, so they can be properly rendered 
+    #so the structure of the list will now include one additional nested list. each subsegment slice is now a list of all slice islands first (most will be length 1)
+    finalContours = SeparateIslands(CloneList(finalContours))
+    finalContours = Segmentation.SubsegmentPointFiller(finalContours)
+    contours.segmentedContours = finalContours
 
 def CordChopper(contours: Contours):
     #this  function chops the spinal cord axially into chunks of 2cm vertical length. This starts from the top of the cord, and any remaining <2cm chunk left at the bottom is ignored. 
@@ -264,18 +286,23 @@ def SeparateIslands(contours):
 
 
 def ZChop(contours, numCutsZ):
-    zCuts = BestCutZ(contours, numCutsZ) #Get the list of z values where structure is to be chopped
-
+    
     newContoursList = []
+    if type(contours) != list:
+        contours_array = contours.wholeROI
+        zCuts = BestCutZ(contours.wholeROI, numCutsZ) #Get the list of z values where structure is to be chopped
+    else:
+        contours_array = contours    
+        zCuts = BestCutZ(contours, numCutsZ) #Get the list of z values where structure is to be chopped
 
     for i in range(len(zCuts)):
         contoursZ = ClosestContourZ(zCuts[i], contours) #Get the closest contour above and below the cut
         newContour = []
-        for j in range(len(contours.wholeROI[contoursZ[0]][0])): #Go over all points in closest contour
+        for j in range(len(contours_array[contoursZ[0]][0])): #Go over all points in closest contour
 
-            point1 = contours.wholeROI[contoursZ[0]][0][j]
+            point1 = contours_array[contoursZ[0]][0][j]
             #Now get the closest point in second closest contour
-            point2 = ClosestPoint(point1, contours.wholeROI[contoursZ[1]])
+            point2 = ClosestPoint(point1, contours_array[contoursZ[1]])
             #now interpolate between the two
             newPoint = InterpolateXY(point1, point2, zCuts[i])
 
@@ -284,8 +311,8 @@ def ZChop(contours, numCutsZ):
         #add this new contour to newContoursList
         newContoursList.append([newContour])    
     #Now add all the original contours to the newcontourslist and sort it by z value
-    for i in range(len(contours.wholeROI)):
-        newContoursList.append(contours.wholeROI[i])
+    for i in range(len(contours_array)):
+        newContoursList.append(contours_array[i])
     newContoursList.sort(key=GetZVal)
 
     #Now create a list of contour lists for each axial slice
@@ -306,15 +333,15 @@ def ZChop(contours, numCutsZ):
 
             
 
-            
-    contours.segmentedContours3 =  axialContours  
+    if type(contours) != list:        
+        contours.segmentedContours3 =  axialContours  
 
     return axialContours           
             
 
 def GetZVal(e): 
     #function for returning z value of a contour
-    if len(e) == 0:
+    if len(e[0]) == 0:
         raise ValueError("Contour of 0 points has no z value")
     return e[0][0][2]
 
@@ -331,13 +358,13 @@ def GetContourArea(contour):
 
 def BestCutZ(contours, numCuts):
     zCuts = [] 
-    numContours = len(contours.wholeROI)
+    numContours = len(contours)
     totalVolume = 0
-    deltaZ = abs(contours.wholeROI[0][0][0][2]- contours.wholeROI[1][0][0][2]) #axial distance between slices 
+    deltaZ = abs(contours[0][0][0][2]- contours[1][0][0][2]) #axial distance between slices 
     contourAreas = []
     for i in range(numContours-1):
         area=0
-        area += GetContourArea(contours.wholeROI[i])
+        area += GetContourArea(contours[i])
         contourAreas.append(area)
         if i != numContours - 1:  #Dont include the final area in the volume calculation, since it would be over-extending
             totalVolume += area * deltaZ
@@ -357,7 +384,7 @@ def BestCutZ(contours, numCuts):
         #now get the avg area for the slicing region: 
         avgArea = 0.5 * (contourAreas[contIndex - 1] + contourAreas[contIndex])
 
-        zSlice = contours.wholeROI[contIndex - 1][0][0][2] + (volumeGoal * totalVolume - volumeBelow) / avgArea
+        zSlice = contours[contIndex - 1][0][0][2] + (volumeGoal * totalVolume - volumeBelow) / avgArea
         zCuts.append(zSlice)
     return zCuts    
 
@@ -371,6 +398,8 @@ def ClosestContourZ(z, contours):
 
     #First find closest contour
     for i in range(len(contours)):
+        if len(contours[i][0]) == 0:
+            continue
         contourDistance = abs(contours[i][0][0][2] - z)    
         if contourDistance < temp:
             closestContours[0] = i
@@ -380,6 +409,8 @@ def ClosestContourZ(z, contours):
     #Now get second closest contour
     temp = 1000
     for i in range(len(contours)):
+        if len(contours[i][0]) == 0:
+            continue
         if i == closestContours[0]: #Can't count the closest contour again
             continue        
         contourDistance = abs(contours[i][0][0][2] - z)
@@ -479,7 +510,7 @@ def YChop(contours, numCutsY):
     return finalContours        
 
 def BestCutY(contours, numCutsY):
-    errorTolerance = 5e-5
+    errorTolerance = 0.001
     area = 0
     maxY = -1000
     minY = 1000
@@ -504,6 +535,7 @@ def BestCutY(contours, numCutsY):
         cutContours = [] 
 
         error = 1000
+        time1 = time.time()
         while error > errorTolerance:     
             tempContours.clear()
             yCut = (minY + maxY) / 2
@@ -525,6 +557,8 @@ def BestCutY(contours, numCutsY):
                 minY = yCut
             elif (newArea / area > areaGoal):
                 maxY = yCut
+            if time.time() - time1 > 5:
+                break #stop after 5 seconds    
 
              
         yCuts.append(yCut) 
@@ -654,7 +688,7 @@ def XChop(contours, numCuts):
         #contours[i] = ClosedLooper(contours[i])
 
         #now divide into separate parts
-        finalContours = []
+    finalContours = []
     divisions = [] #list for each y division for current contour
 
     #make the list the correct size so there is an item for each x div
@@ -683,13 +717,14 @@ def XChop(contours, numCuts):
                     if contours[i][0][j][0] >= xCuts[x-1] and contours[i][0][j][0] <= xCuts[x]:
                         divisions[x].append(contours[i][0][j].copy())
         for div in range(len(divisions)):
-            temp = ClosedLooper(divisions[div])
-            finalContours[div].append(copy.deepcopy([temp]))
+            if divisions[div] != []:
+                temp = ClosedLooper(divisions[div])
+                finalContours[div].append(copy.deepcopy([temp]))
     return finalContours   
 
 
 def BestCutX(contours, numCuts):
-    errorTolerance = 5e-5
+    errorTolerance = 0.001
     volume = 0
     xCuts= []
 
@@ -718,6 +753,7 @@ def BestCutX(contours, numCuts):
         cutContours = [] 
         numIters = 0
         error = 1000
+        time1 = time.time()
         while error > errorTolerance and numIters < 1000:     
             
             tempContours.clear()
@@ -753,6 +789,8 @@ def BestCutX(contours, numCuts):
             #Re-adjust the max/min if stuck
                
             numIters = numIters + 1
+            if time.time() - time1 > 5:
+                break #stop after 5 seconds    
   
         xCuts.append(xCut) 
 

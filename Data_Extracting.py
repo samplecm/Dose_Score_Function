@@ -20,6 +20,8 @@ import Chopper
 import Visuals
 import statistics
 import Distance_Operations
+import DVH_Fitting
+import scipy as sp
 
 try:
     a = 2/0
@@ -27,7 +29,7 @@ try:
     processed_path = os.path.join(os.getcwd(), "Processed_Patients")
     training_Path = os.path.join(os.getcwd(), "Training_Data")
 except: 
-    patients_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Func/20211110_Caleb_SGFX"    
+    patients_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/20211110_Caleb_SGFX"    
     processed_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients"
     training_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients/Training_Data"
 
@@ -47,23 +49,21 @@ def Get_HN_Patients():
         "submandibular_right",
         "submandibular_left", 
     ]
-    
 
 
     patients = os.listdir(patients_path)
     #random.shuffle(patients)
     processed_Files = os.listdir(processed_path)
     occurrences_dict = dict.fromkeys(organs, 0)
-    for patient in patients:
+    for patient in patients[156:]:
         print("Getting OARs for " + patient)
 
         patient_path = os.path.join(patients_path, patient)
         processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
         processed_patient = GetContours(patient, patient_path, organs, try_load = False)
-        processed_patient = GetPTVs(processed_patient, patient, patient_path)    
-
+        if processed_patient.prescription_dose == None or processed_patient.dose_array == []:
+            continue
         processed_patient = Distance_Operations.Get_Spatial_Relationships(processed_patient)
-        # processed_patient = 
         #save data
         with open(os.path.join(processed_patient_path, patient), "wb") as fp:
             pickle.dump(processed_patient, fp)
@@ -82,14 +82,89 @@ def Get_Training_Data(file, roi_list):
     print("Finished getting training data for " + file)
 
 def Get_Dose_Voxels(dose_array, contours_obj: Contours):
-    contours = contours_obj.wholeROI #first get for whole ROI
-    organ_masks = GetContourMasks(contours, dose_array)
+    #first get whole roi
+    contours = contours_obj.wholeROI
+
+    #get max, min x and y
+    min_x = 1000
+    max_x = -1000
+    min_y = 1000
+    max_y = -1000
+    min_z = 1000
+    max_z = -1000
+    for slices in contours:
+        for slice in slices:
+            if slice == []:
+                continue
+
+            if slice[0][2] < min_z:
+                min_z = slice[0][2]
+            if slice[0][2] > max_z:
+                max_z = slice[0][2]   
+
+            for point in slice:
+                if point[0] < min_x:
+                    min_x = point[0]
+                if point[0] > max_x:
+                    max_x = point[0]
+                if point[1] < min_y:
+                    min_y = point[1]
+                if point[1] > max_y:
+                    max_y = point[1]  
+   
+    #now crop the dose array
+    x_vals = dose_array[1, 0, 0,:]
+    y_vals = dose_array[2, 0, :,0]
+    z_vals = dose_array[3,:,0,0]
+
+    x_bounds = [0,len(x_vals)]
+    y_bounds = [0,len(y_vals)]
+    z_bounds = [0, len(z_vals)]
+
+    if z_vals[0] > z_vals[-1]:
+        dose_array = dose_array[:, ::-1,:,:]
+
+    for x in range(dose_array.shape[3]):
+        if dose_array[1,0,0,x] > min_x:
+            x_bounds[0] = max(x-1,0)
+            for x_2 in range(x, dose_array.shape[3]):    
+                if dose_array[1,0,0,x_2] > max_x:
+                    x_bounds[1] = x_2
+                    break
+            break        
+
+    for y in range(dose_array.shape[2]):
+        if dose_array[2,0,y,0] > min_y:
+            y_bounds[0] = max(y-1,0)    
+            for y2 in range(y, dose_array.shape[2]):
+                if dose_array[2,0,y2,0] > max_y:
+                    y_bounds[1] = y2   
+                    break
+            break
+    for z in range(dose_array.shape[1]):
+        if dose_array[3,z,0,0] > min_z:
+            z_bounds[0] = max(0,z-1)    
+            for z2 in range(z, dose_array.shape[1]):
+                if dose_array[3,z2,0,0] > max_z:
+                    z_bounds[1] = z2  
+                    break
+            break    
+    #now crop dose array
+    cropped_array =  dose_array[:,z_bounds[0]:z_bounds[1], y_bounds[0]:y_bounds[1], x_bounds[0]:x_bounds[1]]           
+    #now upsample array
+    upsampled_array = cropped_array.repeat(3, axis=3).repeat(3, axis=2)
+
+
+
+        
+    # contours = contours_obj.wholeROI #first get for whole ROI
+    organ_masks = GetContourMasks(contours, upsampled_array)
     organ_dose_voxels = []
-    for slice in range(dose_array.shape[1]):
+    for slice in range(upsampled_array.shape[1]):
         if np.amax(organ_masks[0,slice,:,:]) == 0: #no contour on slice
             continue
         layer_bool_mask = organ_masks[0, slice, :, :] > 0
-        contour_dose = dose_array[0, slice, :,:][layer_bool_mask]
+        contour_dose = upsampled_array[0, slice, :,:][layer_bool_mask]
         #contour_dose is a list of all dose pixels in contour on current slice.
         organ_dose_voxels.extend(contour_dose)
         #now divide organ dose pixels into 10 bins. 
@@ -98,13 +173,13 @@ def Get_Dose_Voxels(dose_array, contours_obj: Contours):
 
     subseg_dose_voxels = []    
     for subseg in contours_obj.segmentedContours:
-        organ_masks = GetContourMasks(subseg, dose_array)
+        organ_masks = GetContourMasks(subseg, upsampled_array)
         organ_dose_voxels = []
-        for slice in range(dose_array.shape[1]):
+        for slice in range(upsampled_array.shape[1]):
             if np.amax(organ_masks[0,slice,:,:]) == 0: #no contour on slice
                 continue
             layer_bool_mask = organ_masks[0, slice, :, :] > 0
-            contour_dose = dose_array[0, slice, :,:][layer_bool_mask]
+            contour_dose = upsampled_array[0, slice, :,:][layer_bool_mask]
             #contour_dose is a list of all dose pixels in contour on current slice.
             organ_dose_voxels.extend(contour_dose)
             #now divide organ dose pixels into 10 bins. 
@@ -162,7 +237,6 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
                 "d_90": d_90,
                 "d_95": d_95
             }
-            print("")
             setattr(organ_obj, "dose", dose)
             setattr(patient, organ, organ_obj)        
 
@@ -203,7 +277,7 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
                 "d_90": d_90,
                 "d_95": d_95
             }
-            print("")
+
             setattr(ptv_obj, "dose", dose)
             
 
@@ -227,7 +301,7 @@ def Get_DVHs(patient_name, organs, ptvs, dose_array):
     else:     
         print("Processed patient object for " + patient_name + " was not found. Skipping")    
         return 
-    print("")           
+        
 
 def Get_PTV_Volume_Doses(ptv_dose_pixels, ptv_dose):
     perc_95 = 0.95 * ptv_dose
@@ -299,7 +373,7 @@ def Get_Dose_Array(patient, patient_path):
             continue 
     if doseFile == None:
         print("No dose array found for " + patient)
-        return None       
+        return []       
     dose_array = patientData.pixel_array * float(patientData[0x3004, 0x000E].value) #Dose Grid Scaling Attribute
     dose_units = patientData[0x3004, 0x0002].value
     if dose_units != "GY":
@@ -322,12 +396,12 @@ def Get_Dose_Array(patient, patient_path):
         full_array[0,z,:,:] = dose_array[z,:,:]   
         # plt.imshow(full_array[0,z,:,:]) 
         # plt.show()                
-        for x_idx in range(dose_array.shape[2]):
-            for y_idx in range(dose_array.shape[1]):
-                x = ipp[0] + x_idx*pixel_spacing[0]
-                y = ipp[1] + y_idx*pixel_spacing[1]
-                full_array[1,z,y_idx,x_idx] = x
-                full_array[2,z,y_idx,x_idx] = y   
+    for x_idx in range(dose_array.shape[2]):
+        for y_idx in range(dose_array.shape[1]):
+            x = ipp[0] + x_idx*pixel_spacing[0]
+            y = ipp[1] + y_idx*pixel_spacing[1]
+            full_array[1,:,y_idx,x_idx] = x
+            full_array[2,:,y_idx,x_idx] = y   
     #print(np.amax(full_array[0,:,:,:]))        
     return full_array   
         
@@ -416,8 +490,6 @@ def Get_ROI_to_PTV_Distances(patient_name, organs, ptvs):
             
 
 
-    print("")
-
 def GetPTVs(processed_patient, patient, patient_path): 
     processed_patient_path = os.path.join(os.getcwd(),"Processed_Patients")
 
@@ -501,7 +573,9 @@ def GetPTVs(processed_patient, patient, patient_path):
     if noPTVs:
         print("PTV" + str(ptv) + " not found.")
         Print_all_PTVs(structFiles)
-    processed_patient.prescription_dose = max(ptv_prescriptions)    
+        processed_patient.prescription_dose = None
+    else:    
+        processed_patient.prescription_dose = max(ptv_prescriptions)    
     #save
     with open(os.path.join(processed_patient_path, patient), "wb") as fp:
         pickle.dump(processed_patient, fp)          
@@ -564,6 +638,18 @@ def Print_DICOM_Structures(structureList):
         for element in roiSequence:
             name = element.get("ROIName").lower()
             print(name.lower())
+def Filter_Contour_Slice_Ends(contours):
+    #look for last contour that is far away from other slices   
+    filtered_contours = [] 
+    for slice in contours:
+        if len(slice[0]) != 0:
+            filtered_contours.append(copy.deepcopy(slice))
+    if abs(filtered_contours[-1][0][0][2] - filtered_contours[-2][0][0][2]) > 5:
+        del filtered_contours[-1]
+    if abs(filtered_contours[0][0][0][2] - filtered_contours[1][0][0][2]) > 5:
+        del filtered_contours[-1]    
+    return filtered_contours    
+
 
 def GetContours(patient, patient_path, organs, try_load=False): 
     #save contour list for specified organ for all patients to patient binary file
@@ -583,9 +669,11 @@ def GetContours(patient, patient_path, organs, try_load=False):
     else: 
         processed_patient = Patient(patient, str(os.path.join(patient_path, patient))) 
 
-
+    processed_patient = GetPTVs(processed_patient, patient, patient_path)    
     #get the patient's dose array 
     processed_patient.dose_array = Get_Dose_Array(patient, patient_path)  
+    if processed_patient.dose_array == []:
+        return processed_patient
     files = glob.glob(os.path.join(patient_path, "*"))
     structFiles = [] 
     #sometimes there is a nested study directory here instead of the file list. in that case need to move in one more level
@@ -650,7 +738,7 @@ def GetContours(patient, patient_path, organs, try_load=False):
                             print("Warning: error occurred when checking if ROI already had a contour at the z value: " + str(z))
                     if slice_exists == False:        
                         contourList.append([tempContour]) 
-                
+                contourList = Filter_Contour_Slice_Ends(contourList)
                 contours = Contours(organ, structure, contourList)    #creat contours object 
                 print("Segmenting contours...")
 
@@ -659,12 +747,35 @@ def GetContours(patient, patient_path, organs, try_load=False):
                 #if organ is spinal cord, then segmentation is different (divided into 2cm chunks...)
                 if organ=="spinal_cord":
                     Chopper.CordChopper(contours)
+                elif "submand" in organ:    
+                    Chopper.OrganChopper(contours, [1,1,1])
+                elif "mandible" in organ:
+                    Chopper.MandibleChopper(contours)         
                 else:    
-                    Chopper.OrganChopper(contours, [2,2,2])
-                Get_Dose_Voxels(processed_patient.dose_array, contours)    
+                    Chopper.OrganChopper(contours, [2,2,1])
+                Get_Dose_Voxels(processed_patient.dose_array, contours)  
+                if processed_patient.prescription_dose == None:
+                    continue
                 #now save contours to patient object. 
-                
+                dvh_arrays, dvh_params = DVH_Fitting.Get_DVH(contours.dose_voxels, processed_patient.prescription_dose)  
+                setattr(contours, "dvh_bins_whole" , dvh_arrays)   
+                setattr(contours, "dvh_params_whole" , dvh_params)   
 
+                dvh_arrays_subsegs = []
+                dvh_params_subsegs = []
+                for dose_array in contours.dose_voxels_subsegs:
+                    if len(dose_array) == 0:
+                        dvh_arrays_subsegs.append([])
+                        dvh_params_subsegs.append([])
+                        continue
+
+                    dvh_arrays, dvh_params = DVH_Fitting.Get_DVH(dose_array, processed_patient.prescription_dose)  
+                    dvh_arrays_subsegs.append(dvh_arrays)
+                    dvh_params_subsegs.append(dvh_params)
+
+                setattr(contours, "dvh_bins_subsegs" , dvh_arrays_subsegs)   
+                setattr(contours, "dvh_params_subsegs" , dvh_params_subsegs)      
+                    
                 try:
                     setattr(processed_patient, organ, contours)   
                 except:
@@ -720,9 +831,7 @@ def GetContours(patient, patient_path, organs, try_load=False):
                             contourList.append([tempContour]) 
                     
                     contours = Contours(organ, structure, contourList)   
-                    #now save contours to patient object. 
-                       
-
+                    #now save contours to patient object.                        
                     try:
                         setattr(processed_patient, str("opti_" + organ), contours)   
                     except:
@@ -731,8 +840,8 @@ def GetContours(patient, patient_path, organs, try_load=False):
                 except: 
                     print("No contour Sequence.")                
                     print(str("saving " + organ + " contours to " + patient + ". Matched structure: " + structure))
-    with open(os.path.join(processed_patient_path, patient), "wb") as fp:
-        pickle.dump(processed_patient, fp) 
+    # with open(os.path.join(processed_patient_path, patient), "wb") as fp:
+    #     pickle.dump(processed_patient, fp) 
     return processed_patient                
                 
                 

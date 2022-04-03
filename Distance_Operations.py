@@ -117,7 +117,8 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
 
                     delta_x = x - centre_x
                     delta_y = y - centre_y
-
+                    if delta_x == 0: 
+                        delta_x += 0.01
                     phi = math.atan(abs(delta_y)/abs(delta_x))
                     #fix quadrant
                     if delta_y < 0 and delta_x < 0:
@@ -170,7 +171,8 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
                     delta_x = x - centre_x
                     delta_y = y - centre_y
                     r = math.sqrt(delta_x**2 + delta_y **2 + delta_z **2 )
-
+                    if delta_x == 0:
+                        delta_x += 0.01
                     phi = math.atan(abs(delta_y)/abs(delta_x))
                     #fix quadrant
                     if delta_y < 0 and delta_x < 0:
@@ -232,11 +234,11 @@ def Get_PTV_Bools(oar, ptv_list):
             non_overlap_ptvs[-1].append([])
             for ptv_slice in ptv_slices:
                 ptv_z = ptv_slice[0][2]
-                if len(ptv_slice) == 0:
+                if len(ptv_slice) < 3:
                     continue
                 for slice in oar:
                     slice = slice[0]
-                    if len(slice) == 0:
+                    if len(slice) < 3:
                         continue
                     if slice[0][2] == ptv_z:
                         oar_slice_exists = True
@@ -285,7 +287,7 @@ def Overlap_Frac(oar, ptv_list, centre_point):
         slice_1 = oar[o][0]
         slice_2 = oar[o+1][0]
 
-        if len(slice_1) == 0 or len(slice_2) == 0:
+        if len(slice_1) < 3 or len(slice_2) < 3:
             continue
 
         z_1 = slice_1[0][2]
@@ -304,7 +306,7 @@ def Overlap_Frac(oar, ptv_list, centre_point):
             for ptv_slices in ptv:
                 for ptv_slice in ptv_slices:
 
-                    if len(ptv_slice) == 0:
+                    if len(ptv_slice) < 3:
                         continue
                     if abs(int(round(centre_z, 2)*100) - int(round(ptv_slice[0][2], 2)*100)) < 2:
                         pol = Contour_to_Polygon(ptv_slice) 
@@ -349,8 +351,8 @@ def Get_Contour_Centres(contours : Contours):
     print(f"Calculating centres for {contours.roiName}")
 
     #first calculate for whole ROI 
-    centre_slice, centre_z = Get_Centre_Slice(contours.wholeROI)    
-    centre_point = Get_Centre_Point(centre_slice, centre_z)
+    centre_slice = Get_Centre_Slice(contours.wholeROI)    
+    centre_point = Get_Centre_Point(centre_slice)
 
     #now calculate for all subsegments 
     subseg_centres = [] 
@@ -362,7 +364,7 @@ def Get_Contour_Centres(contours : Contours):
     #set centres as contour attributes
     contours.centre_point = centre_point
     contours.centre_point_subsegs = subseg_centres
-    print("")
+
 
 #----------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -386,8 +388,7 @@ def Get_Centre_Slice(contours : list):
         try:
             z_vals.append(slice[0][0][2])
         except IndexError: #contour empty on slice
-            z_vals.append(10000)
-            continue   
+            pass
      
     min_z = min(z_vals)
     max_z = max(z_vals)            
@@ -428,8 +429,8 @@ def Get_Centre_Slice(contours : list):
 
 
         centre_contour = copy.deepcopy(newContour)   
+        contours = list(filter(lambda layer: layer != [[]], contours))
         contours.sort(key=Chopper.GetZVal)  
-    if centre_contour == [[]]:
-        print("")     
-    return centre_contour, centre_z
+    
+    return centre_contour
 

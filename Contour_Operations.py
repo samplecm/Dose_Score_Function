@@ -44,7 +44,7 @@ def Point_to_Polygon_Distance(point : Point, polygon : Polygon):
     
 
 def Contour_to_Polygon(contour):
-    if len(contour) == 0:
+    if len(contour) < 3:
         return None
     contour_xy = [Point(contour[i][0:2]) for i in range(len(contour))]
 
@@ -75,14 +75,15 @@ def Distance_Between_ROIs(roi1, roi2):
     minDistance = 1000000
     for slices in roi1:
         for slice in slices:
-            if len(slice) == 0:
+            if len(slice) < 3:
                 continue
             z_slice = slice[0][2]
 
             closest_slice_idx = min(z_vals_roi2, key=lambda z:abs(z[0]-z_slice))[1]  #get the closest z value index in z_vals_roi_2
 
             closest_slice = roi2[closest_slice_idx[0]][closest_slice_idx[1]] 
-
+            if len(closest_slice) < 3:
+                continue
             slice_polygon = Contour_to_Polygon(slice)
             closest_slice_polygon = Contour_to_Polygon(closest_slice)
 
