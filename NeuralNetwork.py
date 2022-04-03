@@ -13,6 +13,17 @@ import statistics as stats
 import matplotlib.pyplot as plt
 import onnxruntime
 
+try:
+    a = 2/0
+    patients_path = os.path.join(os.getcwd(), "Patients")
+    processed_path = os.path.join(os.getcwd(), "Processed_Patients")
+    training_Path = os.path.join(os.getcwd(), "Training_Data")
+except: 
+    patients_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/20211110_Caleb_SGFX"    
+    processed_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients"
+    training_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients/Training_Data"
+
+
 class Dose_DataSet(torch.utils.data.DataLoader):
     def __init__(self, X, y, scale_data=True):
         if not torch.is_tensor(X) and not torch.is_tensor(y):
@@ -244,7 +255,20 @@ def Train(path):
 
 
 
-    print("Completed Training")      
+    print("Completed Training")  
+
+def PreprocessData():
+    processed_patients = os.listdir(processed_path)
+    for patient_path in processed_patients:
+       with open(os.path.join(processed_path, patient_path), "rb") as fp:
+           patient = pickle.load(fp)
+
+
+def TrainModels():
+    PreprocessData()
+
+
+
 
 if __name__ == "__main__":
     torch.manual_seed(42)

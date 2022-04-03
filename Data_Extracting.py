@@ -55,7 +55,7 @@ def Get_HN_Patients():
     #random.shuffle(patients)
     processed_Files = os.listdir(processed_path)
     occurrences_dict = dict.fromkeys(organs, 0)
-    for patient in patients[156:]:
+    for patient in patients[171:]:
         print("Getting OARs for " + patient)
 
         patient_path = os.path.join(patients_path, patient)

@@ -63,7 +63,7 @@ def Get_DVH(dose_voxels, prescription_dose):
     dose_bin_size = 1.2 / num_bins
     volumes = np.linspace(0,0, num=num_bins)
     for voxel in dose_voxels:
-        volume_bin = math.floor(voxel / (1.2*prescription_dose/num_bins))
+        volume_bin = min(math.floor(voxel / (1.2*prescription_dose/num_bins)), 199)
         volumes[volume_bin] += 1 / dose_bin_size
     volumes /= len(dose_voxels)
     params = Fit_DVH_Params(dose_bins, volumes)   
