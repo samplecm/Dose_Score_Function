@@ -24,7 +24,6 @@ import DVH_Fitting
 import scipy as sp
 
 try:
-    a = 2/0
     patients_path = os.path.join(os.getcwd(), "Patients")
     processed_path = os.path.join(os.getcwd(), "Processed_Patients")
     training_Path = os.path.join(os.getcwd(), "Training_Data")

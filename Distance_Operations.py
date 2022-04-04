@@ -208,7 +208,7 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
                 if angle_points[theta_idx][phi_idx] == []:
                     max_dists.append([1111, 1111, 1111])
                 else:    
-                    max_dists.append(max(angle_points[theta_idx][phi_idx]))
+                    max_dists.append([max(angle_points[theta_idx][phi_idx]), phi, theta])
 
             elif angle_points[theta_idx][phi_idx] == []:
                 min_dists.append([1111, 1111, 1111])
