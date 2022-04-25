@@ -75,92 +75,32 @@ def Get_Spatial_Relationships(patient_obj : Patient):
 
 def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
     #returns overlap fraction and the minimum and average distance to the PTV, in different windows divided with spherical coordinates. 
-    #for each subsegment, I am interested in: 
-    #radial distance to each ptv within 18 separate windows made of permutations of theta and phi divisions
-    # theta:  -90 - -30, -30 - 30, 30 - 90 
-    # phi: 0 - 60, 60- 120, 120-180, 180-240, 240 - 300, 300 - 360 
+    #divide into 12 phi ranges and for each have 9 ranges of theta
+    
     ptv_arrays = []
     for ptv in ptvs:
         ptv_arrays.append(ptv.wholeROI)
     overlap_frac, centre_overlap_bool = Overlap_Frac(roi, ptv_arrays, centre_point)
     non_overlap_ptvs = Get_PTV_Bools(roi, ptv_arrays)
-    pi = math.pi
+
 
     #make list for holding different angles 
-    angle_points = [
-        [[], [], [], [], [], []],
-        [[], [], [], [], [], []],
-        [[], [], [], [], [], []]
-    ]
+    angle_points = []
+    for i in range(12):
+        angle_points.append([])
+        for j in range(9):
+            angle_points[-1].append([])
 
     #now loop over ptv points and get distance data
     centre_x = centre_point[0]
     centre_y = centre_point[1]
     centre_z = centre_point[2]
 
-    thetas = []
-    phis = []
-
-    #first get list of ptv point angles:
-    for ptv in non_overlap_ptvs:
-        for slices in ptv:
-            for slice in slices:
-                for p, point in enumerate(slice):
-                    if p % 2 != 0:  #use every second point
-                        continue
-                    if p == 0:
-                        z = point[2]
-                        delta_z = z - centre_z
-
-                    x = point[0]
-                    y =point[1]
-
-                    delta_x = x - centre_x
-                    delta_y = y - centre_y
-                    if delta_x == 0: 
-                        delta_x += 0.01
-                    phi = math.atan(abs(delta_y)/abs(delta_x))
-                    #fix quadrant
-                    if delta_y < 0 and delta_x < 0:
-                        phi += math.pi
-                    elif delta_y >0 and delta_x < 0:
-                        phi += math.pi     
-                    if delta_z == 0:
-                        theta = 0    
-                    else:
-                        theta = math.atan(math.sqrt(delta_x**2+delta_y**2)/delta_z) + math.pi/2    #in range 0 --> pi
-                    thetas.append(theta)
-                    phis.append(phi)    
-
-    #now get angle ranges:
-    thetas.sort() 
-    phis.sort()
-    theta_gap = [0,0, -100000] #hold angle1 and angle2 and gap which define the largest range where no points exist. 
-    phi_gap = [0,0, -100000]
-    for t in range(len(thetas)-1):
-        if thetas[t+1] - thetas[t] > theta_gap[2]:
-            theta_gap = [thetas[t], thetas[t+1], thetas[t+1] - thetas[t]]
-    for p in range(len(phis)-1):
-        if phis[p+1] - phis[p] > phi_gap[2]:
-            phi_gap = [phis[p], phis[p+1], phis[p+1] - phis[p]]
-
-    theta_range = [theta_gap[1], theta_gap[0]+ math.pi]
-    phi_range = [phi_gap[1], phi_gap[0]+ 2*math.pi]
-
-    if thetas[0] + (math.pi - thetas[-1]) > theta_gap[2]:
-        theta_range = [thetas[0], thetas[-1]]
-    if phis[0] + (2*math.pi - phis[-1]) > phi_gap[2]:
-        phi_range = [phis[0], phis[-1]]
-
-    phi_range_dist = (phi_range[1] - phi_range[0]) / 6
-    theta_range_dist = (theta_range[1] - theta_range[0]) / 3
 
     for ptv in non_overlap_ptvs:
         for slices in ptv:
             for slice in slices:
                 for p, point in enumerate(slice):
-                    if p % 2 != 0:  #use every second point
-                        continue
                     if p == 0:
                         z = point[2]
                         delta_z = z - centre_z
@@ -179,44 +119,36 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
                         phi += math.pi
                     elif delta_y >0 and delta_x < 0:
                         phi += math.pi     
-                    if delta_z == 0:
-                        theta = 0    
+                    if phi < 0: #quadrant 4
+                        phi += 2*math.pi    
                     else:
-                        theta = math.atan(math.sqrt(delta_x**2+delta_y**2)/delta_z) + math.pi /2
-                    if phi < phi_range[0]:
-                        phi += 2*math.pi
-                    if theta < theta_range[0]:
-                        theta += math.pi    
-                    phi_bin = math.floor((phi - phi_range[0]) / phi_range_dist)
-                    theta_bin = math.floor((theta - theta_range[0]) / theta_range_dist)
+                        theta = math.acos(z/r) 
+                    phi_bin = math.floor(phi / (math.pi * 2 / 12))
+                    theta_bin = math.floor((theta) / (math.pi/9))
                     #handle case of the maximum angle points
-                    if theta_bin == 3:
-                        theta_bin = 2
-                    if phi_bin == 6:
-                        phi_bin = 5    
 
-                    angle_points[theta_bin][phi_bin].append(r)
+                    angle_points[phi_bin][theta_bin].append(r)
 
     min_dists = []
     max_dists = []            
-    for theta_idx in range(len(angle_points)):
-        for phi_idx in range(len(angle_points[theta_idx])):
-            phi = phi_range[0] + phi_idx + phi_range_dist
-            theta = theta_range[0] + theta_idx * theta_range_dist
+    for phi_idx in range(len(angle_points)):
+        min_dists.append([])
+        max_dists.append([])
+        for theta_idx in range(len(angle_points[phi_idx])):
             if centre_overlap_bool == True:
-                min_dists.append([0, 0, 0])
-                if angle_points[theta_idx][phi_idx] == []:
-                    max_dists.append([1111, 1111, 1111])
+                min_dists[-1].append(0)
+                if angle_points[phi_idx][theta_idx] == []:
+                    max_dists[-1].append(1111)
                 else:    
-                    max_dists.append([max(angle_points[theta_idx][phi_idx]), phi, theta])
+                    max_dists[-1].append(max(angle_points[phi_idx][theta_idx]))
 
-            elif angle_points[theta_idx][phi_idx] == []:
-                min_dists.append([1111, 1111, 1111])
-                max_dists.append([1111, 1111, 1111])
+            elif angle_points[phi_idx][theta_idx] == []:
+                min_dists[-1].append(1111)
+                max_dists[-1].append(1111)
 
             else: 
-                min_dists.append([min(angle_points[theta_idx][phi_idx]), phi, theta])    
-                max_dists.append([max(angle_points[theta_idx][phi_idx]), phi, theta])
+                min_dists[-1].append(min(angle_points[phi_idx][theta_idx]))    
+                max_dists[-1].append(max(angle_points[phi_idx][theta_idx]))
     # if overlap_frac > 0:
     #     print("hehe")
     return overlap_frac, min_dists, max_dists            

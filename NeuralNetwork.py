@@ -12,6 +12,7 @@ import Statistics
 import statistics as stats
 import matplotlib.pyplot as plt
 import csv
+import DVH_Fitting
 import statistics 
 
 try:
@@ -24,18 +25,18 @@ except:
     processed_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients"
     training_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients/Training_Data"
 
-organs = [
-        "brainstem",
-        "larynx",
-        "mandible", 
-        "oral_cavity",
-        "parotid_left",
-        "parotid_right", 
-        "spinal_cord", 
-        "submandibular_right",
-        "submandibular_left", 
-    ]
-#organs = ["submandibular_left"]
+# organs = [
+#         "brainstem",
+#         "larynx",
+#         "mandible", 
+#         "oral_cavity",
+#         "parotid_left",
+#         "parotid_right", 
+#         "spinal_cord", 
+#         "submandibular_right",
+#         "submandibular_left", 
+#     ]
+organs = ["brainstem", "parotid_left", "larynx"]
 
  
 def DataScaler_Training(path):
@@ -108,125 +109,6 @@ def Predict(input):
     return prediction
     print("")          
 
-def Train(path):
-    #first need to split data into training/validation set. Will do a 85/15 split
-    DataScaler_Training(path)
-    files = os.listdir(path) 
-    num_training_files = int(len(files) * 0.85)
-    random.shuffle(files)
-    training_files = files[0:num_training_files]
-    validation_files = files[num_training_files:]
-    num_validation_files = len(validation_files)
-    X_training_stack = np.zeros((num_training_files, 12 , 3))
-    y_training_stack = np.zeros((num_training_files, 9 , 5))
-    
-    for idx, file in enumerate(training_files):
-        file_path = os.path.join(path, file)
-        with open(file_path, "rb") as fp:
-            X,y = pickle.load(fp)
-            X_training_stack[idx,:,:] = X
-            y_training_stack[idx, :,:] = y
-            
-    X_validation_stack = np.zeros((num_validation_files, 12 , 3))
-    y_validation_stack = np.zeros((num_validation_files, 9 , 5))
-    for idx, file in enumerate(validation_files):
-        file_path = os.path.join(path, file)
-        with open(file_path, "rb") as fp:
-            X,y = pickle.load(fp)
-
-            X_validation_stack[idx,:] = X
-            y_validation_stack[idx, :] = y  
-            
-    X_training_stack, y_training_stack , X_validation_stack, y_validation_stack =  Statistics.Scale_NonExisting_Features(X_training_stack, y_training_stack , X_validation_stack, y_validation_stack)       
-    prediction = Predict(X_validation_stack[0,:,:])  
-    real = y_validation_stack[0,:,:]
-    #reshape arrays 
-    X_training_stack = np.reshape(X_training_stack, (X_training_stack.shape[0], X_training_stack.shape[1]*X_training_stack.shape[2]))
-    y_training_stack = np.reshape(y_training_stack, (y_training_stack.shape[0], y_training_stack.shape[1]*y_training_stack.shape[2]))
-    X_validation_stack = np.reshape(X_validation_stack, (X_validation_stack.shape[0], X_validation_stack.shape[1]*X_validation_stack.shape[2]))
-    y_validation_stack = np.reshape(y_validation_stack, (y_validation_stack.shape[0], y_validation_stack.shape[1]*y_validation_stack.shape[2]))
-    
-
-    #Now create a dataloader object
-    train_set = Dose_DataSet(X_training_stack,y_training_stack)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=True, num_workers=1)
-    validation_set = Dose_DataSet(X_validation_stack,y_validation_stack)
-    validation_loader = torch.utils.data.DataLoader(validation_set, batch_size=5, shuffle=True, num_workers=1)
-    mlp = MLP()
-    loss_function = nn.L1Loss()
-    optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
-    loss_history = []
-    for epoch in range(0,100):
-        print(f'Starting epoch {epoch+1}')
-        
-        for i, data in enumerate(train_loader):
-            inputs, targets = data
-            inputs, targets = inputs.float(), targets.float()
-            targets = targets.reshape((targets.shape[0], 45))
-
-            outputs = mlp(inputs)
-            
-            loss = loss_function(outputs, targets)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad() #zero gradients
-
-        total_loss = 0
-        for i, data in enumerate(validation_loader):
-            inputs, targets = data
-            inputs, targets = inputs.float(), targets.float()
-            targets = targets.reshape((targets.shape[0], 45))
-
-            outputs = mlp(inputs)
-            
-            loss = loss_function(outputs, targets)
-            total_loss += loss.item()
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad() #zero gradients
-        loss_history.append(round(total_loss / (i+1),2))    
-        print(f'Validation Loss: {round(total_loss / (i+1),2)}')        
-    #save the loss history
-    with open (os.path.join(os.getcwd(), "Saved_Values", "LossHistory.txt"), "wb") as fp:
-        pickle.dump(loss_history, fp)
-    #save the model     
-    torch.save(mlp.state_dict(), os.path.join(os.getcwd(), "Saved_Values", "Model.onnx"))    
-    
-    x_range = np.linspace(1, 3001, 3000)
-    y_range = loss_history
-    plt.plot(x_range, y_range, label = "Loss")
-    plt.xlabel('Epoch')
-    plt.ylabel("Batch Loss")
-    plt.title("Lostt History")
-    print("Loss History During Training")  
-    plt.legend()
-    plt.show()
-    plt.savefig(os.path.join(os.getcwd(), "Saved_Values", "LossHistoryPlot.jpg"))
-
-
-    """Takes a PyTorch model and converts it to an Open Neural Network Exchange 
-       (ONNX) model for operability with other programming languages. The new 
-       model is saved into the Models folder.
-
-    Args:
-        organ (str): the name of the organ for which a PyTorch model is to 
-            be converted to an ONNX model
-        modelType (str): specifies whether a UNet or MultiResUnet model is 
-            to be converted
-
-    """
-
-
-
-    #Now need a dummy image to predict with to save the weights
-    x = np.zeros((512,512))
-    x = torch.from_numpy(x)
-    x = torch.reshape(x, (1,1,512,512)).float()
-    torch.onnx.export(mlp,x,os.path.join(os.getcwd(), str("dose_model.onnx")), export_params=True, opset_version=10)
-    try:
-        session = onnxruntime.InferenceSession(os.getcwd(), str("dose_model.onnx"))
-    except (TypeError, RuntimeError) as e:
-        raise e
 
 def Get_OAR_Distances():
     #adds another list attribute to each patient (oar_dists) which contains the radial distance to each other whole oar (1111 if not present)
@@ -267,12 +149,6 @@ def Get_OAR_Distances():
     oar_dist_stats = [statistics.mean(all_dists), statistics.stdev(all_dists)]    
     with open(os.path.join(statistics_path, "oar_dist_stats"), "wb") as fp:
         pickle.dump(oar_dist_stats, fp)      
-
-        
-
-
-
-
 
 
 def Get_Distance_Stats():
@@ -341,8 +217,8 @@ def Get_Training_Arrays():
                         training_array.append(z)
 
                     for ptv_idx in range(min(len(all_subseg_data[idx]), 2)):
-                        training_array.append(all_subseg_data[idx][ptv_idx][0])
-                        training_array.append(all_subseg_data[idx][ptv_idx][1])
+                        training_array.append(all_subseg_data[idx][ptv_idx][0])   #ptv type
+                        training_array.append(all_subseg_data[idx][ptv_idx][1])   #overlap frac
                         for point in all_subseg_data[idx][ptv_idx][2]:
                             if point[0] ==1111:
                                 training_array.append(10)
@@ -461,15 +337,16 @@ def Cross_Validate(dir, oar_dir, subseg_num, organ, fold=10):
     val_size = int(0.1*(len(cross_val_files)))
     percent_diffs_all = []
     for i in range(fold):
+        print(f"starting fold {i+1}")
         fold_dir = os.path.join(cross_val_dir, str(i))
         val_files = cross_val_files[i*val_size:(i+1)*val_size]
         train_files = [file for file in cross_val_files if file not in val_files]
         train_stack, val_stack, train_stack_y, val_stack_y = Get_Training_Stacks(train_files, val_files, dir)
 
         train_set = DataSet(train_stack,train_stack_y)
-        train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=False, num_workers=1)
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=4, shuffle=False, num_workers=1)
         validation_set = DataSet(val_stack, val_stack_y)
-        val_loader = torch.utils.data.DataLoader(validation_set, batch_size=5, shuffle=False, num_workers=1) 
+        val_loader = torch.utils.data.DataLoader(validation_set, batch_size=4, shuffle=False, num_workers=1) 
 
         model, loss_history, percent_diffs = Train_Model(train_loader, val_loader)
         for j, item in enumerate(percent_diffs):
@@ -486,9 +363,10 @@ def Cross_Validate(dir, oar_dir, subseg_num, organ, fold=10):
     with open (os.path.join(cross_val_dir, "test_files.txt"), "wb") as fp:
         pickle.dump(test_files, fp)   
 
-    test_stats = Get_Test_Stats(test_files, dir)  
+    test_stats, model = Get_Test_Stats(test_files, dir)  
     with open (os.path.join(cross_val_dir, "test_stats.txt"), "wb") as fp:
         pickle.dump(test_stats, fp)     
+    torch.save(model.state_dict(), os.path.join(cross_val_dir, "test_model.pt"))     
     print(f"Finished Cross Validation training")   
 
 
@@ -516,10 +394,9 @@ def Get_Training_Stacks(train_files, val_files, path):
 
 def Train_Test_Model(test_loader):
     mlp = MLP()
-    loss_function = nn.L1Loss()
-    optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
-    loss_history = []
-    for epoch in range(0,175):
+    loss_function = nn.MSELoss()#nn.L1Loss()
+    optimizer = torch.optim.Adam(mlp.parameters(), lr=5e-5)
+    for epoch in range(0,800):
         print(f'Starting epoch {epoch+1}')
         
         for i, data in enumerate(test_loader):
@@ -537,10 +414,10 @@ def Train_Test_Model(test_loader):
 
 def Train_Model(train_loader, val_loader):
     mlp = MLP()
-    loss_function = nn.L1Loss()
-    optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
+    loss_function = nn.MSELoss()#nn.L1Loss()
+    optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-5)
     loss_history = []
-    for epoch in range(0,175):
+    for epoch in range(0,1200):
         print(f'Starting epoch {epoch+1}')
         
         for i, data in enumerate(train_loader):
@@ -568,7 +445,7 @@ def Train_Model(train_loader, val_loader):
             optimizer.zero_grad() #zero gradients
 
         loss_history.append(round(total_loss / (i+1),2))    
-        print(f'Validation Loss: {round(total_loss / (i+1),4)}')  
+        print(f'Validation Loss: {round(total_loss / (i+1),7)}')  
     percent_diffs = []
     for i, data in enumerate(val_loader):    #get % diffs
         inputs, targets = data
@@ -577,7 +454,7 @@ def Train_Model(train_loader, val_loader):
         outputs = mlp(inputs)
         targets = targets.detach().numpy()
         outputs = outputs.detach().numpy()
-        percent_diff = [(outputs[0][0]-targets[0][0]), (outputs[0][1]-targets[0][1])]
+        percent_diff = [(outputs[0][0]-targets[0][0]), (outputs[0][1]-targets[0][1])]    #used for model pruning
         percent_diffs.append(percent_diff)
 
  
@@ -613,9 +490,9 @@ def Get_Pruned_Test_Stats(train_files, test_files, dir):
     test_set = DataSet(stack,stack_y)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=1)  
     train_set = DataSet(train_stack,train_stack_y)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=False, num_workers=1)      
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=4, shuffle=False, num_workers=1)      
     model = Train_Test_Model(train_loader)
-    percent_diffs = []    
+    actual_params = []    
     params = []
     for i, data in enumerate(test_loader):    #get % diffs
         inputs, targets = data
@@ -624,10 +501,9 @@ def Get_Pruned_Test_Stats(train_files, test_files, dir):
         outputs = model(inputs)
         targets = targets.detach().numpy()
         outputs = outputs.detach().numpy()
-        percent_diff = [(outputs[0][0]-targets[0][0]), (outputs[0][1]-targets[0][1])]
-        params.append([outputs[0][0], outputs[0][1]])
-        percent_diffs.append(percent_diff)      
-    return [params, percent_diffs]   
+        actual_params.append([targets[0][0], targets[0][1]])
+        params.append([outputs[0][0], outputs[0][1]])    
+    return [params, actual_params]   
 
 def Get_Test_Stats(test_files, dir):
     files = os.listdir(dir)
@@ -653,9 +529,9 @@ def Get_Test_Stats(test_files, dir):
     test_set = DataSet(stack,stack_y)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=1)  
     train_set = DataSet(train_stack,train_stack_y)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=False, num_workers=1)      
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=4, shuffle=False, num_workers=1)      
     model = Train_Test_Model(train_loader)
-    percent_diffs = []    
+    actual_params = []    
     params = []
     for i, data in enumerate(test_loader):    #get % diffs
         inputs, targets = data
@@ -664,10 +540,9 @@ def Get_Test_Stats(test_files, dir):
         outputs = model(inputs)
         targets = targets.detach().numpy()
         outputs = outputs.detach().numpy()
-        percent_diff = [(outputs[0][0]-targets[0][0]), (outputs[0][1]-targets[0][1])]
-        params.append([outputs[0][0], outputs[0][1]])
-        percent_diffs.append(percent_diff)      
-    return [params, percent_diffs]      
+        actual_params.append([targets[0][0], targets[0][1]])
+        params.append([outputs[0][0], outputs[0][1]])    
+    return [params, actual_params], model     
 
 
 class DataSet(torch.utils.data.DataLoader):
@@ -686,8 +561,8 @@ class MLP(nn.Module):
         self.layers = nn.Sequential(
             nn.Linear(176, 200),
             nn.ReLU(),
-            # nn.Linear(200,200),
-            # nn.ReLU(),
+            nn.Linear(200,200),
+            nn.ReLU(),
             nn.Linear(200,100),
             nn.ReLU(),
             nn.Linear(100,50),
@@ -720,23 +595,31 @@ def Get_Test_Stats_CSV():
                 with open (os.path.join(cross_val_dir, "test_stats.txt"), "rb") as fp:
                     data = pickle.load(fp)
                 param_1 = []
-                diff_1 = []
+                actual_param_1 = []
                 param_2 = []
-                diff_2 = []
+                actual_param_2 = []
+                param_diffs_1 = []
+                param_diffs_2 = []
                 for idx in range(len(data[0])):
                     param_1.append(data[0][idx][0])
                     param_2.append(data[0][idx][1])
-                    diff_1.append(data[1][idx][0])
-                    diff_2.append(data[1][idx][1])
+                    actual_param_1.append(data[1][idx][0])
+                    actual_param_2.append(data[1][idx][1])
+                    param_diffs_1.append(param_1[-1]-actual_param_1[-1])
+                    param_diffs_2.append(param_2[-1]-actual_param_2[-1])
                 p1_avg = str(statistics.mean(param_1))
                 p1_std = str(np.std(param_1))
                 p2_avg = str(statistics.mean(param_2))
                 p2_std = str(np.std(param_2))
-                diff_1_avg = str(statistics.mean(diff_1))
-                diff_1_std = str(np.std(diff_1))
-                diff_2_avg = str(statistics.mean(diff_2))
-                diff_2_std = str(np.std(diff_2))
-                filewriter.writerow([subseg, p1_avg, p1_std, p2_avg, p2_std, diff_1_avg, diff_1_std, diff_2_avg, diff_2_std])    
+                actual_1_avg = str(statistics.mean(actual_param_1))
+                actual_1_std = str(np.std(actual_param_1))
+                actual_2_avg = str(statistics.mean(actual_param_2))
+                actual_2_std = str(np.std(actual_param_2))
+                diff_1_avg = str(statistics.mean(param_diffs_1))
+                diff_1_std = str(np.std(param_diffs_1))
+                diff_2_avg = str(statistics.mean(param_diffs_2))
+                diff_2_std = str(np.std(param_diffs_2))
+                filewriter.writerow([subseg, p1_avg, p1_std, p2_avg, p2_std, actual_1_avg, actual_1_std, actual_2_avg, actual_2_std, diff_1_avg, diff_1_std, diff_2_avg, diff_2_std])    
 
 def Get_Pruned_Test_Stats_CSV():
     for organ in organs:
@@ -745,7 +628,7 @@ def Get_Pruned_Test_Stats_CSV():
             oar_dir = os.path.join(training_path, organ)
             subseg_dirs = os.listdir(oar_dir)
             subseg_dirs.sort() 
-            filewriter.writerow(['', 'P1 avg','P1 std', 'P1 percent diff', 'P1 percent diff std', 'P2 avg', 'P2 std', 'P2 percent diff', 'P2 percent diff std'])
+            filewriter.writerow(['', 'P1 avg','P1 std', 'P2 avg', 'P2 std', 'P1 Actual avg', 'P1 Actual std', 'P2 Actual avg', 'P2 Actual std', 'P1 diff avg', 'P1 diff std',  'P2 diff avg', 'P2 diff std'])
             for subseg in subseg_dirs:
                 if subseg == "cross_validation":
                     continue
@@ -795,45 +678,128 @@ def TrainModels():
     # for patient_path in processed_patients:
     #    with open(os.path.join(processed_path, patient_path), "rb") as fp:
     #        patient = pickle.load(fp)
+def Get_DVH_Plot(organ):
+    oar_dir = os.path.join(training_path, organ)
+    # subseg_dirs = os.listdir(oar_dir)
+    # subseg_dirs.sort(key=int)
+    
+    cross_val_dir = model_path = os.path.join(training_path, organ, "cross_validation")
+    subseg_dirs = os.listdir(cross_val_dir)
+    subseg_dirs.sort()
+    test_files = pickle.load(open(os.path.join(cross_val_dir,subseg_dirs[0], "test_files.txt"),"rb"))
+    #model_path = os.path.join(cross_val_dir, subseg_dirs[0],"test_model.pt")
+    model_path = os.path.join(cross_val_dir, subseg_dirs[1], str(0), "model.pt")
+
+    model = MLP()
+    model.load_state_dict(torch.load(model_path))  
+    for test_file in test_files:
+        Plot_DVH(model, oar_dir, test_file)
+
+def Plot_DVH(model, organ_dir, file_name):
+    #this function computes predicted and actual cumulative dvhs from all the differential dvhs of subsegments. It plots them all together     
+
+    subseg_dirs = os.listdir(organ_dir)
+    subseg_dirs.sort()
+    volumes_predicted = []
+    volumes = []
+    for dir in subseg_dirs:
+        if dir == "cross_validation":
+            continue
+        file_path = os.path.join(organ_dir, dir, str(file_name))
+        dose_range, volume_predicted, volume = Get_Diff_DVHs(model, file_path)
+        volumes_predicted.append(volume_predicted)
+        volumes.append(volume)
+    total_volumes = np.linspace(0, 0, 1000)
+    total_volumes_pred = np.linspace(0, 0, 1000) 
+    for volume_idx in range(len(volumes)):
+        total_volumes += volumes[volume_idx] / len(subseg_dirs)
+        total_volumes_pred += volumes_predicted[volume_idx] / len(subseg_dirs)
+    total_volumes = NormalizeDVH(dose_range, total_volumes)
+    total_volumes_pred = NormalizeDVH(dose_range, total_volumes_pred)   
+    total_volumes_cumul = GetCumulativeDVH(dose_range, total_volumes)
+    total_volumes_pred_cumul = GetCumulativeDVH(dose_range, total_volumes_pred)
+    #first plot these:
+    fig, axs = plt.subplots(2,2)
+    colors = ['r', 'b', 'g', 'c', 'm', 'lime', 'darkorange']
+    for dvh_idx in range(len(volumes_predicted)):
+        c = colors[dvh_idx % 7]
+        axs[0,0].plot(dose_range, volumes_predicted[dvh_idx], label=f"S{dvh_idx}", color=c)
+        axs[0,1].plot(dose_range, volumes[dvh_idx], label=f"S{dvh_idx}", color=c)
+    axs[0,0].set_title("Predicted Differential DVHs")
+    axs[0,0].set_ylabel("Volume")
+    axs[0,0].set_xlabel("Normalized Dose")   
+    axs[0,0].legend() 
+    axs[0,1].set_ylabel("Volume")
+    axs[0,1].set_xlabel("Normalized Dose")
+    axs[0,1].set_title("Planned Differential DVHs")
+    axs[0,1].legend()
+
+    axs[1,0].plot(dose_range, total_volumes_pred, label="Predicted Differential DVHs")
+    axs[1,0].set_ylabel("Volume")
+    axs[1,0].set_xlabel("Normalized Dose")
+    axs[1,0].plot(dose_range, total_volumes, label="Planned Differential DVHs")
+    axs[1,0].set_title("Differential DVHs")
+    axs[1,0].legend()
+
+    axs[1,1].plot(dose_range, total_volumes_pred_cumul, label="Predicted Cumulative DVHs")
+    axs[1,1].set_ylabel("Volume")
+    axs[1,1].set_xlabel("Normalized Dose")
+    axs[1,1].plot(dose_range, total_volumes_cumul, label="Planned Cumulative DVHs")
+    axs[1,1].set_title("Cumulative DVHs")
+    axs[1,1].legend()
+    plt.show()
+    print("")   
+
+def GetCumulativeDVH(dose_range, volumes):
+    volume = 1
+    cumulative_range = np.linspace(0,0, 1000)
+    for idx in range(len(dose_range)-1):
+        volume -= volumes[idx] * (dose_range[idx+1]-dose_range[idx])
+        cumulative_range[idx] = volume
+    return cumulative_range    
 
 
-def Plot_Diff_DVHs(model, file_paths, with_real=True):
+def NormalizeDVH(dose_range, volume_vals):
+    sum = 0
+    for idx in range(len(dose_range)-1):
+        sum += (dose_range[idx+1]-dose_range[idx]) * volume_vals[idx]
+    return volume_vals / sum    
+
+def Get_Diff_DVHs(model, file_path):
     #first get the predicted parameters
-    params = []
-    predicted_params = []
 
-    stack = np.zeros((len(file_paths), 176))
-    stack_y = np.zeros((len(file_paths), 2))
+
+    stack = np.zeros((1, 176))
+    stack_y = np.zeros((1, 2))
 
 
     idx = 0
-    for file in file_paths:
-        data = pickle.load(open(file, "rb"))
-        stack[idx,:] = data[0]
-        stack_y[idx,:] = data[1]
-        params.append(data[1])
-        idx += 1
+    data = pickle.load(open(file_path, "rb"))
+    stack[idx,:] = data[0]
+    stack_y[idx,:] = data[1]
+    idx += 1
 
 
-    test_set = DataSet(stack,stack_y)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=1)  
-    train_set = DataSet(train_stack,train_stack_y)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=5, shuffle=False, num_workers=1)      
-    model = Train_Test_Model(train_loader)
-    percent_diffs = []    
-    params = []
-    for i, data in enumerate(test_loader):    #get % diffs
+    set = DataSet(stack,stack_y)
+    loader = torch.utils.data.DataLoader(set, batch_size=1, shuffle=False, num_workers=1)  
+   
+    for i, data in enumerate(loader):    #get % diffs
         inputs, targets = data
         inputs, targets = inputs.float(), targets.float()
 
         outputs = model(inputs)
-        targets = targets.detach().numpy()
         outputs = outputs.detach().numpy()
-        percent_diff = [(outputs[0][0]-targets[0][0]), (outputs[0][1]-targets[0][1])]
-        params.append([outputs[0][0], outputs[0][1]])
-        percent_diffs.append(percent_diff)      
-
-    print("")
+        predicted_params = ([outputs[0][0], outputs[0][1]])
+        params =([targets[0][0], targets[0][1]])
+    
+    #now get the curves for the different dvhs using the integral equation
+    dose_range = np.linspace(0, 1.2, 1000)
+    integral_equation = np.vectorize(DVH_Fitting.skew_normal_integral_all)
+    volume_vals_predicted = integral_equation(dose_range, predicted_params[0], predicted_params[1], 0)
+    volume_vals = integral_equation(dose_range, params[0], params[1], 0)
+    volume_vals = NormalizeDVH(dose_range, volume_vals)
+    volume_vals_predicted = NormalizeDVH(dose_range, volume_vals_predicted)
+    return dose_range, volume_vals_predicted, volume_vals
 
 
 
