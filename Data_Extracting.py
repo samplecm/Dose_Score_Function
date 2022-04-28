@@ -8,6 +8,7 @@ from fastDamerauLevenshtein import damerauLevenshtein
 import pickle
 from operator import itemgetter
 from Contours import Contours
+from NeuralNetwork import Get_Training_Arrays
 from Patient import Patient
 import Statistics 
 import copy
@@ -50,38 +51,188 @@ def Get_HN_Patients():
     ]
 
 
-    # patients = os.listdir(patients_path)
+    patients = os.listdir(patients_path)
     # #random.shuffle(patients)
     
-    # for patient in patients:
-    #     print("Getting OARs for " + patient)
+    for patient in patients:
+        print("Getting OARs for " + patient)
 
-    #     patient_path = os.path.join(patients_path, patient)
-    #     processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
-    #     processed_patient = GetContours(patient, patient_path, organs, try_load = False)
+        patient_path = os.path.join(patients_path, patient)
+        processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
+        # processed_patient = GetContours(patient, patient_path, organs, try_load = False)
         
-    #     if processed_patient == 1: #invalid
-    #         continue
-    #     if processed_patient.prescription_dose == None or processed_patient.dose_array == []:
-    #         continue
-    #     processed_patient = Distance_Operations.Get_Spatial_Relationships(processed_patient)
-    #     processed_patient = Distance_Operations.Get_OAR_Distances(organs, processed_patient)
-    #     #save data
-    #     processed_patient = Distance_Operations.Get_OAR_Distances(organs, processed_patient)
-    #     with open(os.path.join(processed_patient_path, patient), "wb") as fp:
-    #         pickle.dump(processed_patient, fp)
+        # if processed_patient == 1: #invalid
+        #     continue
+        # if processed_patient.prescription_dose == None or processed_patient.dose_array == []:
+        #     continue
+
+        with open(os.path.join(processed_patient_path, patient), "rb") as fp:
+            processed_patient = pickle.load(fp)
+        processed_patient = Distance_Operations.Get_Spatial_Relationships(processed_patient)
+        #processed_patient = Distance_Operations.Get_OAR_Distances(organs, processed_patient)
+
+
+        with open(os.path.join(processed_patient_path, patient), "wb") as fp:
+            pickle.dump(processed_patient, fp)
             
 
     #     #Now need the dose stats
     #     print(f"Finished collecting data for {patient}")
+    
 
     Distance_Operations.Get_Distance_Stats(processed_path, statistics_path, organs)
+
+    for patient in patients:
+        patient_path = os.path.join(os.getcwd(), "Processed_Patients", patient)
+        Get_Training_Data(patient_path, organs)
+
+
+
+
     print("Finished processing data for head and neck patients")
 
-def Get_Training_Data(file, roi_list):
-    #Calculating training data. 
-    print("Finished getting training data for " + file)
+def Get_Training_Data(patient, organs):
+    processed_patients = os.listdir(processed_path)
+    #get stats for normalizing data
 
+    for patient_path in processed_patients:
+        with open(os.path.join(processed_path, patient_path), "rb") as fp:
+            patient = pickle.load(fp)
+            for oar in organs:
+                oar_obj = getattr(patient, oar)
+                all_subseg_data = oar_obj.spatial_data_subsegs
+                dvh_arrays_subsegs = getattr(oar_obj, "dvh_bins_subsegs")
+                for s in range(len(all_subseg_data)):
+                    if not os.path.exists(os.path.join(os.getcwd(), "Training_Data", oar, str(s))):
+                        os.mkdir(os.path.join(os.getcwd(), "Training_Data", oar, str(s)))
+                    #if more than 4 ptv types, combine the bottom  prescription (minimum distance of both, with max ptv num)    
+                    training_array = np.ones((6,20,20))
+                    #first add oar distances 
+                    oar_dists = oar_obj.oar_distances_subsegs[s]
+                    for o2_idx, o2 in enumerate(organs):
+                        with open(os.path.join(statistics_path, f"{oar}_{s}_{o2}_stats"), "rb") as fp:
+                            stats = pickle.load(fp)
+                            min = stats[0]
+                            max = stats[1]
+                            oar_dist = (oar_dists[o2_idx] - min) / (max-min)    
+                            training_array[:,1+o2_idx,0] = oar_dist
+                            training_array[:,0,1+o2_idx] = oar_dist 
+                            training_array[:,18-o2_idx,0] = oar_dist 
+                            training_array[:,18-o2_idx,19] = oar_dist  
+                            training_array[:,19,1+o2_idx] = oar_dist  
+                            training_array[:,19,18-o2_idx] = oar_dist       
+                            training_array[:,1+o2_idx,19] = oar_dist  
+                            training_array[:,0,18-o2_idx] = oar_dist    
+                    with open(os.path.join(statistics_path, f"{oar}_{s}_ptv__min_stats"), "rb") as fp:
+                        ptv_min = pickle.load(fp)[0]
+                    with open(os.path.join(statistics_path, f"{oar}_{s}_ptv__max_stats"), "rb") as fp:
+                        ptv_max = pickle.load(fp)[1]  
+                      
+                    for ptv_idx in range(len(all_subseg_data[s])):
+                        ptv_type = all_subseg_data[s][ptv_idx][0]   #ptv type
+                        overlap_frac = all_subseg_data[s][ptv_idx][1]  #overlap frac
+                        training_array[ptv_idx*2:(ptv_idx*2)+1, 9:10,9] = overlap_frac
+                        training_array[ptv_idx*2:(ptv_idx*2)+1, 9:10,10] = ptv_type
+                        
+                        min_distances = all_subseg_data[s][ptv_idx][2]
+                        max_distances = all_subseg_data[s][ptv_idx][3]
+                        for p in range(len(min_distances)):
+                            for t in range(len(min_distances[p])):
+                                if min_distances[p][t] == 1111:
+                                    min_dist = 1
+                                else:    
+                                    min_dist = (min_distances[p][t]-ptv_min)/(ptv_max - ptv_min)
+                                if max_distances[p][t] == 1111:
+                                    max_dist = 1
+                                else:    
+                                    max_dist = (max_distances[p][t]-ptv_min)/(ptv_max - ptv_min)    
+                                   
+                                if p == 0:
+                                    training_array[2*ptv_idx, 8-t, 10] = min_dist   
+                                    training_array[2*ptv_idx+1, 8-t, 10] = max_dist 
+                                if p == 1:
+                                    training_array[2*ptv_idx, 8-t, 11+t] = min_dist   
+                                    training_array[2*ptv_idx+1, 8-t, 11+t] = max_dist     
+                                if p == 2:
+                                    training_array[2*ptv_idx, 9, 11+t] = min_dist   
+                                    training_array[2*ptv_idx+1, 9, 11+t] = max_dist 
+                                if p == 3:
+                                    training_array[2*ptv_idx, 10, 11+t] = min_dist   
+                                    training_array[2*ptv_idx+1, 10, 11+t] = max_dist  
+                                if p == 4:
+                                    training_array[2*ptv_idx, 11+t, 11+t] = min_dist   
+                                    training_array[2*ptv_idx+1, 11+t, 11+t] = max_dist 
+                                if p == 5:
+                                    training_array[2*ptv_idx, 11+t, 10] = min_dist   
+                                    training_array[2*ptv_idx+1, 11+t, 10] = max_dist  
+                                if p == 6:
+                                    training_array[2*ptv_idx, 11+t, 9] = min_dist   
+                                    training_array[2*ptv_idx+1, 11+t, 9] = max_dist 
+                                if p == 7:
+                                    training_array[2*ptv_idx, 11+t, 8-t] = min_dist   
+                                    training_array[2*ptv_idx+1, 11+t, 8-t] = max_dist   
+                                if p == 8:
+                                    training_array[2*ptv_idx, 10, 8-t] = min_dist   
+                                    training_array[2*ptv_idx+1, 10, 8-t] = max_dist 
+                                if p == 9:
+                                    training_array[2*ptv_idx, 9, 8-t] = min_dist   
+                                    training_array[2*ptv_idx+1,9, 8-t] = max_dist   
+                                if p == 10:
+                                    training_array[2*ptv_idx, 8-t, 8-t] = min_dist   
+                                    training_array[2*ptv_idx+1, 8-t, 8-t] = max_dist   
+                                if p == 11:
+                                    training_array[2*ptv_idx, 8-t, 9] = min_dist   
+                                    training_array[2*ptv_idx+1, 8-t, 9] = max_dist 
+     
+                    dvh = dvh_arrays_subsegs[s]
+                    dose_range = dvh[0]
+                    volume_range = DVH_Fitting.NormalizeDVH(dose_range, volume_range)
+   
+                    training_data = [training_array, volume_range]            
+                    with open(os.path.join(os.getcwd(), "Training_Data", oar, str(s), str(patient_path+"_data.txt")), "wb") as fp:
+                        pickle.dump(training_data, fp)                   
+
+        print(f"Finished getting training array for {patient_path}")
+                    # if len(all_subseg_data[idx]) > 3:
+                    #     ptv_types = []
+                    #     overlap_frac = 0
+                    #     min_points =[[10000, 0,0]]*18
+                    #     for ptv_idx in range(len(all_subseg_data[idx])-2): 
+                    #         ptv_types.append(all_subseg_data[idx][ptv_idx][0])
+                    #         if all_subseg_data[idx][ptv_idx][1] > overlap_frac:
+                    #             overlap_frac = all_subseg_data[idx][ptv_idx][1]
+                    #         for p, point in enumerate(all_subseg_data[idx][ptv_idx][2]):    
+                    #             if point[0] < min_points[p][0]:
+                    #                 min_points[p] = point   
+                    #     bottom_ptv = statistics.mean(ptv_types)              
+                    #     patient.num_ptv_types = len(all_subseg_data[idx])
+
+                    #     training_array.append(bottom_ptv)
+                    #     training_array.append(overlap_frac)
+                    #     for point in min_points:
+                    #         if point[0] ==1111:
+                    #             training_array.append(10)
+                    #             training_array.append(0)
+                    #             training_array.append(0)
+                    #         else:    
+                    #             training_array.append((point[0]-min_distance_stats[0])/min_distance_stats[1])
+                    #             training_array.append(point[1])
+                    #             training_array.append(point[2])
+
+                    # if len(all_subseg_data[idx]) == 3:    
+                    #     training_array.append(all_subseg_data[idx][2][0])
+                    #     training_array.append(all_subseg_data[idx][2][1])
+                    #     for point in all_subseg_data[idx][2][2]:
+                    #         if point[0] ==1111:
+                    #             training_array.append(10)
+                    #             training_array.append(0)
+                    #             training_array.append(0)
+                    #         else:    
+                    #             training_array.append((point[0]-min_distance_stats[0])/min_distance_stats[1])
+                    #             training_array.append(point[1])
+                    #             training_array.append(point[2])    
+                    
+    
 def Get_Dose_Voxels(dose_array, contours_obj: Contours):
     #first get whole roi
     contours = contours_obj.wholeROI

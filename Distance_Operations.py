@@ -73,13 +73,11 @@ def Get_Distance_Stats(processed_path, statistics_path, organs):
                 distances[-1][-1].append([])    #[oar][subseg][oar measuring distance to]
 
 
-    for patient_path in processed_patients[0:2]:
+    for patient_path in processed_patients:
         print(f"opening {patient_path}")
         with open(os.path.join(processed_path, patient_path), "rb") as fp:
             patient = pickle.load(fp)
-        for o, oar in enumerate(organs):
-            oar_obj_ex = getattr(example_patient, oar)
-            
+        for o, oar in enumerate(organs):            
             oar_obj = getattr(patient, oar)
             oar_dist_subsegs = oar_obj.oar_distances_subsegs
             for s in range(len(oar_dist_subsegs)):
@@ -88,7 +86,7 @@ def Get_Distance_Stats(processed_path, statistics_path, organs):
                         distances[o][s][oar_2_idx].append(oar_obj.oar_distances_subsegs[s][oar_2_idx])        
                     except IndexError:    #uncertain number of spinal cord subsegments. 
                         distances[o].append([])
-                        for oar_2_idx in range(len(oar_dist_subsegs[s])):
+                        for o2_idx in range(len(oar_dist_subsegs[s])):
                             distances[o][s].append([])
                         distances[o][s][oar_2_idx].append(oar_obj.oar_distances_subsegs[s][oar_2_idx])   
 
@@ -115,11 +113,11 @@ def Get_Distance_Stats(processed_path, statistics_path, organs):
     for o in range(len(distances)):
         for s in range(len(distances[o])):
             for o2 in range(len(distances[o][s])):
-                with open(os.path.join(statistics_path, f"{o}_{s}_{o2}_stats"), "wb") as fp:
+                with open(os.path.join(statistics_path, f"{organs[o]}_{s}_{organs[o2]}_stats"), "wb") as fp:
                     pickle.dump([min(distances[o][s][o2]), max(distances[o][s][o2]), statistics.mean(distances[o][s][o2])], fp)                
-            with open(os.path.join(statistics_path, f"{o}_{s}_ptv__min_stats"), "wb") as fp:
+            with open(os.path.join(statistics_path, f"{organs[o]}_{s}_ptv__min_stats"), "wb") as fp:
                 pickle.dump([min(min_distances[o][s]), max(min_distances[o][s]), statistics.mean(min_distances[o][s])], fp)
-            with open(os.path.join(statistics_path, f"{o}_{s}_ptv__max_stats"), "wb") as fp:
+            with open(os.path.join(statistics_path, f"{organs[o]}_{s}_ptv__max_stats"), "wb") as fp:
                 pickle.dump([min(max_distances[o][s]), max(max_distances[o][s]), statistics.mean(max_distances[o][s])], fp)    
 
 
@@ -144,13 +142,10 @@ def Get_Spatial_Relationships(patient_obj : Patient):
     organs = [
         "brainstem",
         "larynx",
-        "mandible", 
         "oral_cavity",
         "parotid_left",
         "parotid_right", 
         "spinal_cord", 
-        "submandibular_right",
-        "submandibular_left", 
     ]
 
     ptvs = patient_obj.PTVs
@@ -246,12 +241,10 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
                         phi += math.pi     
                     if phi < 0: #quadrant 4
                         phi += 2*math.pi    
-                    else:
-                        theta = math.acos(delta_z/r) 
+                    theta = math.acos(delta_z/r) 
                     phi_bin = math.floor(phi / (math.pi * 2 / 12))
                     theta_bin = math.floor((theta) / (math.pi/9))
                     #handle case of the maximum angle points
-
                     angle_points[phi_bin][theta_bin].append(r)
 
     min_dists = []

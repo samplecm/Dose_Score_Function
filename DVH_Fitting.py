@@ -54,7 +54,11 @@ def Fit_DVH_Params(D_array, volume_array):
     return [p1, p2, p3]  
 
 
-    
+def NormalizeDVH(dose_range, volume_vals):
+    sum = 0
+    for idx in range(len(dose_range)-1):
+        sum += (dose_range[idx+1]-dose_range[idx]) * volume_vals[idx]
+    return volume_vals / sum        
 
 def Get_DVH(dose_voxels, prescription_dose):
     #returns a list containing a list for each subsegment. Each of these list in itself contains 2 lists: a dose bin array and a relative volume bin array. the dose bins are defined by lower bounds.
