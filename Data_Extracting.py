@@ -24,13 +24,16 @@ import DVH_Fitting
 import scipy as sp
 
 try:
+    a = 2/0
     patients_path = os.path.join(os.getcwd(), "Patients")
     processed_path = os.path.join(os.getcwd(), "Processed_Patients")
     training_Path = os.path.join(os.getcwd(), "Training_Data")
+    statistics_path = os.path.join(os.getcwd(), "Statistics")
 except: 
-    patients_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/20211110_Caleb_SGFX"    
+    patients_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function_old/20211110_Caleb_SGFX"    
     processed_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients"
     training_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients/Training_Data"
+    statistics_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Statistics"
 
 #--------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -40,40 +43,39 @@ def Get_HN_Patients():
     organs = [
         "brainstem",
         "larynx",
-        "mandible", 
         "oral_cavity",
         "parotid_left",
         "parotid_right", 
         "spinal_cord", 
-        "submandibular_right",
-        "submandibular_left", 
     ]
 
 
-    patients = os.listdir(patients_path)
-    #random.shuffle(patients)
-    processed_Files = os.listdir(processed_path)
-    occurrences_dict = dict.fromkeys(organs, 0)
-    for patient in patients[171:]:
-        print("Getting OARs for " + patient)
+    # patients = os.listdir(patients_path)
+    # #random.shuffle(patients)
+    
+    # for patient in patients:
+    #     print("Getting OARs for " + patient)
 
-        patient_path = os.path.join(patients_path, patient)
-        processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
-        processed_patient = GetContours(patient, patient_path, organs, try_load = False)
-        if processed_patient.prescription_dose == None or processed_patient.dose_array == []:
-            continue
-        processed_patient = Distance_Operations.Get_Spatial_Relationships(processed_patient)
-        #save data
-        with open(os.path.join(processed_patient_path, patient), "wb") as fp:
-            pickle.dump(processed_patient, fp)
+    #     patient_path = os.path.join(patients_path, patient)
+    #     processed_patient_path = os.path.join(os.getcwd(), "Processed_Patients")
+    #     processed_patient = GetContours(patient, patient_path, organs, try_load = False)
+        
+    #     if processed_patient == 1: #invalid
+    #         continue
+    #     if processed_patient.prescription_dose == None or processed_patient.dose_array == []:
+    #         continue
+    #     processed_patient = Distance_Operations.Get_Spatial_Relationships(processed_patient)
+    #     processed_patient = Distance_Operations.Get_OAR_Distances(organs, processed_patient)
+    #     #save data
+    #     processed_patient = Distance_Operations.Get_OAR_Distances(organs, processed_patient)
+    #     with open(os.path.join(processed_patient_path, patient), "wb") as fp:
+    #         pickle.dump(processed_patient, fp)
             
 
-        #Now need the dose stats
-        print(f"Finished collecting data for {patient}")
+    #     #Now need the dose stats
+    #     print(f"Finished collecting data for {patient}")
 
-    # for file in processed_Files:    
-    #     occurrences_dict = Statistics.Get_ROI_Frequencies(file, occurrences_dict)
-    #     #Get_Training_Data(file, training_list)
+    Distance_Operations.Get_Distance_Stats(processed_path, statistics_path, organs)
     print("Finished processing data for head and neck patients")
 
 def Get_Training_Data(file, roi_list):
@@ -508,7 +510,7 @@ def GetPTVs(processed_patient, patient, patient_path):
             structFiles.append(file)   
     noPTVs = True    
     ptv_prescriptions = []    
-    for ptv in range(20, 81):
+    for ptv in range(20, 71):
         structures, structure_roi_nums, struct_idxs, ptv_types = FindPTVs(structFiles, ptv)    
         if structure_roi_nums == 1111:
             continue
@@ -567,7 +569,6 @@ def GetPTVs(processed_patient, patient, patient_path):
                             print("No contours saved to file.")
                         
                     except: 
-
                         print("No contour Sequence.")
     if noPTVs:
         print("PTV" + str(ptv) + " not found.")
@@ -575,9 +576,7 @@ def GetPTVs(processed_patient, patient, patient_path):
         processed_patient.prescription_dose = None
     else:    
         processed_patient.prescription_dose = max(ptv_prescriptions)    
-    #save
-    with open(os.path.join(processed_patient_path, patient), "wb") as fp:
-        pickle.dump(processed_patient, fp)          
+       
     return processed_patient
 
  
@@ -669,6 +668,9 @@ def GetContours(patient, patient_path, organs, try_load=False):
         processed_patient = Patient(patient, str(os.path.join(patient_path, patient))) 
 
     processed_patient = GetPTVs(processed_patient, patient, patient_path)    
+    if len(processed_patient.PTVs) > 3 or len(processed_patient.PTVs) == 0:
+        print("Skipping patient because 0 or more than 3 ptv types found")
+        return 1
     #get the patient's dose array 
     processed_patient.dose_array = Get_Dose_Array(patient, patient_path)  
     if processed_patient.dose_array == []:
@@ -691,12 +693,19 @@ def GetContours(patient, patient_path, organs, try_load=False):
         print("Looking for " + organ + "...")    
         structure, structure_roi_num, struct_idx, dicom_names = FindStructure(structFiles, organ)
 
-        if structure_roi_num == 1111:    
-            print(f"{organ} not found.")
-            continue 
+        
 
         if "stem" in organ:    #only save attribute once, when looking for brain-stem.
             processed_patient.dicom_structures = dicom_names
+            print("Dicom structures:")
+            for val in dicom_names:
+                print(val)
+        if structure_roi_num == 1111:    
+            print(f"{organ} not found. Ending processing.")
+            return 1    #error, skip patient
+        else:
+            print(f"{organ} matched with {structure}")        
+            
 
         structsMeta = pydicom.dcmread(structFiles[struct_idx]).data_element("ROIContourSequence")        
         contourList = []
@@ -708,9 +717,10 @@ def GetContours(patient, patient_path, organs, try_load=False):
                     for contoursequence in contourInfo.ContourSequence: 
                         contour_data = contoursequence.ContourData
                 except: 
+
                     print("No contour Sequence.")
-                    break #break out of loop looking for contour data and move to next organ
-                        #But this is easier to work with if we convert from a 1d to a 2d list for contours ( [ [x1,y1,z1], [x2,y2,z2] ... ] )
+                    return 1
+
                 for contoursequence in contourInfo.ContourSequence: 
                     contour_data = contoursequence.ContourData
                     tempContour = []
@@ -780,67 +790,66 @@ def GetContours(patient, patient_path, organs, try_load=False):
                 except:
                     print("No contours saved to file.")
                 #save
-
                     
 
-    #also look for the opti structures
-    for organ in organs:         
-        print("Looking for opti structure for " + organ + " ...")    
-        structure, structure_roi_num, struct_idx, dicom_names = FindStructure(structFiles, str(organ + "_opti"))
-        #confirm match
-        inp = ""
-        if structure_roi_num == 1111:    
-            print(f"{organ} not found.")
-            continue #nothing to save to the patient
-            # else:
-            #     print("Continuing with organ: " + str(structure))
+    # #also look for the opti structures
+    # for organ in organs:         
+    #     print("Looking for opti structure for " + organ + " ...")    
+    #     structure, structure_roi_num, struct_idx, dicom_names = FindStructure(structFiles, str(organ + "_opti"))
+    #     #confirm match
+    #     inp = ""
+    #     if structure_roi_num == 1111:    
+    #         print(f"{organ} not found.")
+    #         continue #nothing to save to the patient
+    #         # else:
+    #         #     print("Continuing with organ: " + str(structure))
 
-        structsMeta = pydicom.dcmread(structFiles[struct_idx]).data_element("ROIContourSequence")        
-        contourList = []
-        for contourInfo in structsMeta:
-            if contourInfo.get("ReferencedROINumber") == structure_roi_num: #get the matched contour for the given organ
-                print(str("saving " + organ + " opti contours to " + patient + ". Matched structure: " + structure))
+    #     structsMeta = pydicom.dcmread(structFiles[struct_idx]).data_element("ROIContourSequence")        
+    #     contourList = []
+    #     for contourInfo in structsMeta:
+    #         if contourInfo.get("ReferencedROINumber") == structure_roi_num: #get the matched contour for the given organ
+    #             print(str("saving " + organ + " opti contours to " + patient + ". Matched structure: " + structure))
                 
-                try: #sometimes in this dataset, contoursequence dne
-                    for contoursequence in contourInfo.ContourSequence: 
-                        contour_data = contoursequence.ContourData
-                        #But this is easier to work with if we convert from a 1d to a 2d list for contours ( [ [x1,y1,z1], [x2,y2,z2] ... ] )
+    #             try: #sometimes in this dataset, contoursequence dne
+    #                 for contoursequence in contourInfo.ContourSequence: 
+    #                     contour_data = contoursequence.ContourData
+    #                     #But this is easier to work with if we convert from a 1d to a 2d list for contours ( [ [x1,y1,z1], [x2,y2,z2] ... ] )
 
-                        tempContour = []
-                        i = 0
-                        if len(contour_data) > 3:
-                            z = float(contour_data[2])
-                        while i < len(contour_data):
-                            x = float(contour_data[i])
-                            y = float(contour_data[i + 1])                             
-                            tempContour.append([x, y, z ])
-                            i += 3    
-                        #first look to see if a contour at z value already exists
-                        slice_exists = False
-                        for element in contourList:
-                            try:
-                                if element[0][0][2] == z: #check z value of first point in first island of slice
-                                    element.append(tempContour)     
-                                    slice_exists = True
-                                    break                                 
+    #                     tempContour = []
+    #                     i = 0
+    #                     if len(contour_data) > 3:
+    #                         z = float(contour_data[2])
+    #                     while i < len(contour_data):
+    #                         x = float(contour_data[i])
+    #                         y = float(contour_data[i + 1])                             
+    #                         tempContour.append([x, y, z ])
+    #                         i += 3    
+    #                     #first look to see if a contour at z value already exists
+    #                     slice_exists = False
+    #                     for element in contourList:
+    #                         try:
+    #                             if element[0][0][2] == z: #check z value of first point in first island of slice
+    #                                 element.append(tempContour)     
+    #                                 slice_exists = True
+    #                                 break                                 
                                                                 
-                            except:
-                                print("Warning: error occurred when checking if ROI already had a contour at the z value: " + str(z))
-                        if slice_exists == False:        
-                            contourList.append([tempContour]) 
+    #                         except:
+    #                             print("Warning: error occurred when checking if ROI already had a contour at the z value: " + str(z))
+    #                     if slice_exists == False:        
+    #                         contourList.append([tempContour]) 
                     
-                    contours = Contours(organ, structure, contourList)   
-                    #now save contours to patient object.                        
-                    try:
-                        setattr(processed_patient, str("opti_" + organ), contours)   
-                    except:
-                        print("No contours saved to file.")
+    #                 contours = Contours(organ, structure, contourList)   
+    #                 #now save contours to patient object.                        
+    #                 try:
+    #                     setattr(processed_patient, str("opti_" + organ), contours)   
+    #                 except:
+    #                     print("No contours saved to file.")
 
-                except: 
-                    print("No contour Sequence.")                
-                    print(str("saving " + organ + " contours to " + patient + ". Matched structure: " + structure))
-    # with open(os.path.join(processed_patient_path, patient), "wb") as fp:
-    #     pickle.dump(processed_patient, fp) 
+    #             except: 
+    #                 print("No contour Sequence.")                
+    #                 print(str("saving " + organ + " contours to " + patient + ". Matched structure: " + structure))
+    # # with open(os.path.join(processed_patient_path, patient), "wb") as fp:
+    # #     pickle.dump(processed_patient, fp) 
     return processed_patient                
                 
                 

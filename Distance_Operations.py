@@ -7,9 +7,128 @@ import Distance_Operations
 import math
 import Chopper
 import copy
+import os
+import pickle
 from shapely.geometry import Polygon, Point, LineString, polygon
 import logging
+import numpy as np
 logging.getLogger('shapely.geos').setLevel(logging.CRITICAL)
+
+
+
+def Get_OAR_Distances(organs, patient):
+    #adds another list attribute to each patient (oar_dists) which contains the radial distance to each other whole oar (1111 if not present)
+
+    for oar in organs:
+        oar_obj = getattr(patient, oar)
+        oar_dist_subsegs = []
+        for subseg_centre in oar_obj.centre_point_subsegs:
+            oar_dists = []
+
+            for oar_2 in organs:
+                if oar_2 == oar:                  
+                    oar_dists.append(0)
+                    continue
+                
+                oar_obj2 = getattr(patient, oar_2)
+
+                # if oar_obj2 is None:
+                #     oar_dists.append(1111)
+                #     continue
+
+                oar_pos_2 = oar_obj2.centre_point
+                oar_dists.append(np.sqrt((subseg_centre[0]-oar_pos_2[0])**2 + (subseg_centre[1]-oar_pos_2[1])**2 )) #removed z component of distance (issue with spinal cord, etc)
+            oar_dist_subsegs.append(oar_dists)
+        oar_obj.oar_distances_subsegs = oar_dist_subsegs 
+
+        print(f"Finished getting oar distances for {patient.name}")    
+    # oar_dist_stats = [statistics.mean(all_dists), statistics.stdev(all_dists)]    
+    # with open(os.path.join(statistics_path, "oar_dist_stats"), "wb") as fp:
+    #     pickle.dump(oar_dist_stats, fp)      
+    return patient
+
+
+def Get_Distance_Stats(processed_path, statistics_path, organs):
+    #returns and saves to stats directory the mean and std for min distance, max distance
+    processed_patients = os.listdir(processed_path)
+
+    #first need to load a patient to get list sizes
+    with open(os.path.join(processed_path, processed_patients[0]), "rb") as fp:
+        example_patient = pickle.load(fp)
+    #first get the nested list set up for oar distances and ptv distances   
+    distances = [] 
+    min_distances = []
+    max_distances = []   
+    for oar in organs:
+        distances.append([])
+        max_distances.append([])
+        min_distances.append([])
+        oar_obj_ex = getattr(example_patient, oar)
+        oar_dist_subsegs_ex = oar_obj_ex.oar_distances_subsegs
+        for s in range(len(oar_dist_subsegs_ex)):
+            distances[-1].append([])
+            max_distances[-1].append([])
+            min_distances[-1].append([])
+            for oar_2_idx in range(len(oar_dist_subsegs_ex[s])):
+                distances[-1][-1].append([])    #[oar][subseg][oar measuring distance to]
+
+
+    for patient_path in processed_patients[0:2]:
+        print(f"opening {patient_path}")
+        with open(os.path.join(processed_path, patient_path), "rb") as fp:
+            patient = pickle.load(fp)
+        for o, oar in enumerate(organs):
+            oar_obj_ex = getattr(example_patient, oar)
+            
+            oar_obj = getattr(patient, oar)
+            oar_dist_subsegs = oar_obj.oar_distances_subsegs
+            for s in range(len(oar_dist_subsegs)):
+                for oar_2_idx in range(len(oar_dist_subsegs[s])):     
+                    try:            
+                        distances[o][s][oar_2_idx].append(oar_obj.oar_distances_subsegs[s][oar_2_idx])        
+                    except IndexError:    #uncertain number of spinal cord subsegments. 
+                        distances[o].append([])
+                        for oar_2_idx in range(len(oar_dist_subsegs[s])):
+                            distances[o][s].append([])
+                        distances[o][s][oar_2_idx].append(oar_obj.oar_distances_subsegs[s][oar_2_idx])   
+
+                #also need min and max ptv stats  
+                spatial_data = oar_obj.spatial_data_subsegs[s]
+                for ptv_data in spatial_data:
+                    mins = ptv_data[2]
+                    maxes = ptv_data[3]
+                    for phi_idx in range(len(mins)):
+                        for theta_idx in range(len(mins[phi_idx])):
+                            try:
+                                if mins[phi_idx][theta_idx] != 1111:
+                                    min_distances[o][s].append(mins[phi_idx][theta_idx])
+                                if maxes[phi_idx][theta_idx] != 1111:
+                                    max_distances[o][s].append(maxes[phi_idx][theta_idx])   
+                            except IndexError:
+                                min_distances[o].append([])
+                                max_distances[o].append([])
+                                if mins[phi_idx][theta_idx] != 1111:
+                                    min_distances[o][s].append(mins[phi_idx][theta_idx])
+                                if maxes[phi_idx][theta_idx] != 1111:
+                                    max_distances[o][s].append(maxes[phi_idx][theta_idx])  
+
+    for o in range(len(distances)):
+        for s in range(len(distances[o])):
+            for o2 in range(len(distances[o][s])):
+                with open(os.path.join(statistics_path, f"{o}_{s}_{o2}_stats"), "wb") as fp:
+                    pickle.dump([min(distances[o][s][o2]), max(distances[o][s][o2]), statistics.mean(distances[o][s][o2])], fp)                
+            with open(os.path.join(statistics_path, f"{o}_{s}_ptv__min_stats"), "wb") as fp:
+                pickle.dump([min(min_distances[o][s]), max(min_distances[o][s]), statistics.mean(min_distances[o][s])], fp)
+            with open(os.path.join(statistics_path, f"{o}_{s}_ptv__max_stats"), "wb") as fp:
+                pickle.dump([min(max_distances[o][s]), max(max_distances[o][s]), statistics.mean(max_distances[o][s])], fp)    
+
+
+
+
+
+
+
+                
 
 def Get_Spatial_Relationships(patient_obj : Patient):
     #need to get overlap fraction, and spatial proximities of all ptvs to each OAR.
@@ -40,7 +159,6 @@ def Get_Spatial_Relationships(patient_obj : Patient):
         ptv_types.append(int(key[-2:]))
 
     max_ptv = max(ptv_types)
-    num_ptv_types = len(ptv_types)
     #first get centre point for oars and their subsegs
     for organ in organs:
         
@@ -55,23 +173,30 @@ def Get_Spatial_Relationships(patient_obj : Patient):
         if organ_obj == None:
             continue
         spatial_data_subsegs = []
+
         for s, segment in enumerate(organ_obj.segmentedContours):
             spatial_data = []
+
             for p,ptv in enumerate(ptvs):
                 spatial_data.append([])
-                spatial_data[-1].append(ptv_types[p] / max_ptv)    
+                # spatial_data[-1].append(ptv_types[p] / max_ptv)    
+                spatial_data[-1].append(ptv_types[p] / 70)    #normalizing to 70 always now.
                 ptv_list = ptvs[ptv]
                 centre_point = organ_obj.centre_point_subsegs[s]
                 overlap_frac, min_dists, max_dists  = Get_PTV_Distance(segment, ptv_list, centre_point)
                 spatial_data[-1].append(overlap_frac)
                 spatial_data[-1].append(min_dists)
                 spatial_data[-1].append(max_dists)
+
             spatial_data_subsegs.append(spatial_data)
         organ_obj.spatial_data_subsegs = spatial_data_subsegs
 
 
         #get spatial data for each oar with each ptv:
     return patient_obj
+
+
+
 
 def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
     #returns overlap fraction and the minimum and average distance to the PTV, in different windows divided with spherical coordinates. 
@@ -122,7 +247,7 @@ def Get_PTV_Distance(roi : list, ptvs : list, centre_point ):
                     if phi < 0: #quadrant 4
                         phi += 2*math.pi    
                     else:
-                        theta = math.acos(z/r) 
+                        theta = math.acos(delta_z/r) 
                     phi_bin = math.floor(phi / (math.pi * 2 / 12))
                     theta_bin = math.floor((theta) / (math.pi/9))
                     #handle case of the maximum angle points

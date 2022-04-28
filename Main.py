@@ -5,9 +5,9 @@ import NeuralNetwork
 
 def main():
     print("In main function")
-    #Data_Extracting.Get_HN_Patients()
+    Data_Extracting.Get_HN_Patients()
     #NeuralNetwork.TrainModels()
-    NeuralNetwork.Get_DVH_Plot("brainstem")
+    #NeuralNetwork.Get_DVH_Plot("brainstem")
 
 
 

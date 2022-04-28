@@ -25,77 +25,75 @@ except:
     processed_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients"
     training_path = "//PHSAhome1.phsabc.ehcnet.ca/csample1/Profile/Desktop/Programs/Dose_Score_Function/Processed_Patients/Training_Data"
 
-# organs = [
-#         "brainstem",
-#         "larynx",
-#         "mandible", 
-#         "oral_cavity",
-#         "parotid_left",
-#         "parotid_right", 
-#         "spinal_cord", 
-#         "submandibular_right",
-#         "submandibular_left", 
-#     ]
-organs = ["brainstem", "parotid_left", "larynx"]
+    organs = [
+        "brainstem",
+        "larynx",
+        "oral_cavity",
+        "parotid_left",
+        "parotid_right", 
+        "spinal_cord", 
+        "submandibular_right",
+        "submandibular_left", 
+    ]
 
  
-def DataScaler_Training(path):
-    #take the compiled input array and save the mean and the standard deviation for each feature, and scale data so that it has mean 0 and variance 1. 
-    #do this before feature channels have been reshaped to be independent features (so there are 36 features = 12 x 3)
-    files = os.listdir(path) 
-    num_training_files = int(len(files))
-    with open (os.path.join(os.getcwd(), "Saved_Values", "new_none_values.txt"), "rb") as fp:
-        new_none_values = pickle.load(fp)
-    training_files = files[0:num_training_files]
-    X = np.zeros((num_training_files, 12 , 3))
+# def DataScaler_Training(path):
+#     #take the compiled input array and save the mean and the standard deviation for each feature, and scale data so that it has mean 0 and variance 1. 
+#     #do this before feature channels have been reshaped to be independent features (so there are 36 features = 12 x 3)
+#     files = os.listdir(path) 
+#     num_training_files = int(len(files))
+#     with open (os.path.join(os.getcwd(), "Saved_Values", "new_none_values.txt"), "rb") as fp:
+#         new_none_values = pickle.load(fp)
+#     training_files = files[0:num_training_files]
+#     X = np.zeros((num_training_files, 12 , 3))
 
-    for idx, file in enumerate(training_files):
-        file_path = os.path.join(path, file)
-        with open(file_path, "rb") as fp:
-            x,y = pickle.load(fp)
-            X[idx,:,:] = x
+#     for idx, file in enumerate(training_files):
+#         file_path = os.path.join(path, file)
+#         with open(file_path, "rb") as fp:
+#             x,y = pickle.load(fp)
+#             X[idx,:,:] = x
 
-    means = np.zeros(X.shape[1:])
-    stds = np.zeros(X.shape[1:])
-    if len(X.shape) == 3:
-        f_range = range(X.shape[1])
-        c_range = range(X.shape[2])  
-        for f in f_range:
-            for c in c_range:
-                vals = []
-                for s in range(X.shape[0]):
-                    if X[s,f,c] == 1000:
-                        val = new_none_values[f,c]
-                    else:
-                        val = X[s,f,c]    
-                    vals.append(val)
-                std = stats.pstdev(vals)
-                mean = stats.mean(vals) 
-                means[f,c] = mean
-                stds[f,c] = std   
-                # for s in range(X.shape[0]):
-                #     X_scaled[s,f,c] = (X[s,f,c] - mean)/std     
-    else:
-        raise Exception("Could not understand input dimensions.")
+#     means = np.zeros(X.shape[1:])
+#     stds = np.zeros(X.shape[1:])
+#     if len(X.shape) == 3:
+#         f_range = range(X.shape[1])
+#         c_range = range(X.shape[2])  
+#         for f in f_range:
+#             for c in c_range:
+#                 vals = []
+#                 for s in range(X.shape[0]):
+#                     if X[s,f,c] == 1000:
+#                         val = new_none_values[f,c]
+#                     else:
+#                         val = X[s,f,c]    
+#                     vals.append(val)
+#                 std = stats.pstdev(vals)
+#                 mean = stats.mean(vals) 
+#                 means[f,c] = mean
+#                 stds[f,c] = std   
+#                 # for s in range(X.shape[0]):
+#                 #     X_scaled[s,f,c] = (X[s,f,c] - mean)/std     
+#     else:
+#         raise Exception("Could not understand input dimensions.")
   
 
-    with open (os.path.join(os.getcwd(), "Saved_Values", "ScaleParams.txt"), "wb") as fp:
-        pickle.dump([means,stds], fp)
+#     with open (os.path.join(os.getcwd(), "Saved_Values", "ScaleParams.txt"), "wb") as fp:
+#         pickle.dump([means,stds], fp)
   
 
-def Scale_Data(X):
-    with open (os.path.join(os.getcwd(), "Saved_Values", "ScaleParams.txt"), "rb") as fp:
-        means, stds  = pickle.load(fp)
-    with open (os.path.join(os.getcwd(), "Saved_Values", "new_none_values.txt"), "rb") as fp:
-        new_none_values = pickle.load(fp)    
-    f_range = range(X.shape[0])
-    c_range = range(X.shape[1])
-    for f in f_range:
-        for c in c_range:
-            if X[f,c] == 1000:
-                X[f,c] = new_none_values
-            X[f,c] = (X[f,c] - means[f,c]) / stds[f,c]  
-    return X             
+# def Scale_Data(X):
+#     with open (os.path.join(os.getcwd(), "Saved_Values", "ScaleParams.txt"), "rb") as fp:
+#         means, stds  = pickle.load(fp)
+#     with open (os.path.join(os.getcwd(), "Saved_Values", "new_none_values.txt"), "rb") as fp:
+#         new_none_values = pickle.load(fp)    
+#     f_range = range(X.shape[0])
+#     c_range = range(X.shape[1])
+#     for f in f_range:
+#         for c in c_range:
+#             if X[f,c] == 1000:
+#                 X[f,c] = new_none_values
+#             X[f,c] = (X[f,c] - means[f,c]) / stds[f,c]  
+#     return X             
 
 
 def Predict(input):
@@ -109,81 +107,16 @@ def Predict(input):
     return prediction
     print("")          
 
-
-def Get_OAR_Distances():
-    #adds another list attribute to each patient (oar_dists) which contains the radial distance to each other whole oar (1111 if not present)
+def Get_Training_Data(organs):
     processed_patients = os.listdir(processed_path)
-    processed_patients.sort()
-    all_dists = [] 
-    for patient_path in processed_patients:
-        with open(os.path.join(processed_path, patient_path), "rb") as fp:
-            patient = pickle.load(fp)
-            for oar in organs:
-                oar_obj = getattr(patient, oar)
-                if oar_obj is None:
-                    continue
-                oar_dist_subsegs = []
-                for subseg_centre in oar_obj.centre_point_subsegs:
-                    oar_dists = []
-
-                    for oar_2 in organs:
-                        if oar_2 == oar:
-                            continue
-                        
-                        oar_obj2 = getattr(patient, oar_2)
-
-                        if oar_obj2 is None:
-                            oar_dists.append(1111)
-                            continue
-
-                        oar_pos_2 = oar_obj2.centre_point
-                        oar_dists.append(np.sqrt((subseg_centre[1]-oar_pos_2[0])**2 + (subseg_centre[1]-oar_pos_2[1])**2 + (subseg_centre[2]-oar_pos_2[2])**2))
-                        all_dists.append(np.sqrt((subseg_centre[1]-oar_pos_2[0])**2 + (subseg_centre[1]-oar_pos_2[1])**2 + (subseg_centre[2]-oar_pos_2[2])**2))
-
-                    oar_dist_subsegs.append(oar_dists)
-                oar_obj.oar_distances_subsegs = oar_dist_subsegs 
-
-        with open(os.path.join(processed_path, patient_path), "wb") as fp:
-            pickle.dump(patient, fp)     
-        print(f"Finished getting oar distances for {patient_path}")    
-    oar_dist_stats = [statistics.mean(all_dists), statistics.stdev(all_dists)]    
-    with open(os.path.join(statistics_path, "oar_dist_stats"), "wb") as fp:
-        pickle.dump(oar_dist_stats, fp)      
-
-
-def Get_Distance_Stats():
-    #returns and saves to stats directory the mean and std for min distance, max distance
-    processed_patients = os.listdir(processed_path)
-    min_dists = []
-    # max_dists = []
-    
-
-    for patient_path in processed_patients:
-        with open(os.path.join(processed_path, patient_path), "rb") as fp:
-            patient = pickle.load(fp)
-            for oar in organs:
-                oar_obj = getattr(patient, oar)
-                if oar_obj is None:
-                    continue
-                all_subseg_data = oar_obj.spatial_data_subsegs
-                for subseg_data in all_subseg_data:
-                    for ptv_data in subseg_data:
-                        min_data = ptv_data[2]
-                        #max_data = ptv_data[3]
-                        for i in range(len(min_data)):
-                            if min_data[i][0] != 1111:
-                                min_dists.append(min_data[i][0])
-                            # max_dists.append(max_data[i][0])
-        print(f"Finished getting ptv distance data for {patient_path}")                       
-
-    min_stats = [statistics.mean(min_dists), statistics.stdev(min_dists)]    
-    with open(os.path.join(statistics_path, "min_stats"), "wb") as fp:
-        pickle.dump(min_stats, fp)
-
-    # max_stats = [statistics.mean(max_dists), statistics.stdev(max_dists)]    
-    # with open(os.path.join(statistics_path, "max_stats"), "wb") as fp:
-    #     pickle.dump(max_stats, fp)    
-
+    with open(os.path.join(processed_path, processed_patients[0]), "rb") as fp:
+        example_patient = pickle.load(fp)
+    for oar in organs:
+        oar_obj_ex = getattr(example_patient, oar)
+        oar_dist_subsegs_ex = oar_obj_ex.oar_distances_subsegs
+        for s in range(len(oar_dist_subsegs_ex)):
+            print("")
+    print("Finished processing training data")
 def Get_Training_Arrays():
     processed_patients = os.listdir(processed_path)
     #get stats for normalizing data
@@ -656,9 +589,7 @@ def Get_Pruned_Test_Stats_CSV():
 
 
 def TrainModels():
-    #Get_OAR_Distances()
-    #Get_Distance_Stats()
-    #Get_Training_Arrays()
+    Get_Training_Data()
     for oar in organs:
         oar_dir = os.path.join(training_path, oar)
         subseg_dirs = os.listdir(oar_dir)
