@@ -60,7 +60,7 @@ def NormalizeDVH(dose_range, volume_vals):
         sum += (dose_range[idx+1]-dose_range[idx]) * volume_vals[idx]
     return volume_vals / sum        
 
-def Get_DVH(dose_voxels, prescription_dose):
+def Get_DVH_and_Params(dose_voxels, prescription_dose):
     #returns a list containing a list for each subsegment. Each of these list in itself contains 2 lists: a dose bin array and a relative volume bin array. the dose bins are defined by lower bounds.
     num_bins = 200
     dose_bins = np.linspace(0, 1.2, num=num_bins, endpoint=False)
@@ -72,6 +72,18 @@ def Get_DVH(dose_voxels, prescription_dose):
     volumes /= len(dose_voxels)
     params = Fit_DVH_Params(dose_bins, volumes)   
     return [dose_bins.tolist(), volumes.tolist()] , params
+
+def Get_DVH(dose_voxels):
+    #returns a list containing a list for each subsegment. Each of these list in itself contains 2 lists: a dose bin array and a relative volume bin array. the dose bins are defined by lower bounds.
+    num_bins = 200
+    dose_bins = np.linspace(0, 1.2, num=num_bins, endpoint=False)
+    dose_bin_size = 1.2 / num_bins
+    volumes = np.linspace(0,0, num=num_bins)
+    for voxel in dose_voxels:
+        volume_bin = min(math.floor(voxel / (1.2*70/num_bins)), 199)
+        volumes[volume_bin] += 1 / dose_bin_size
+    volumes /= len(dose_voxels)  
+    return [dose_bins.tolist(), volumes.tolist()]
 
 
 

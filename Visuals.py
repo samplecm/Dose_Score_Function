@@ -16,6 +16,15 @@ import copy
 
 import plotly.graph_objects as go
 import Contour_Operations
+def Plot_Training_Array(array):
+    fig, axs = plt.subplots(2,3)
+    axs[0,0].imshow(array[0,:,:])
+    axs[0,1].imshow(array[1,:,:])
+    axs[0,2].imshow(array[2,:,:])
+    axs[1,0].imshow(array[3,:,:])
+    axs[1,1].imshow(array[4,:,:])
+    axs[1,2].imshow(array[5,:,:])
+    plt.show()
 
 
 def set_axes_equal(ax: plt.Axes):
